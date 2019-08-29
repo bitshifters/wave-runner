@@ -44,36 +44,14 @@ EQUB LO(glyph_Magenta)
 EQUB LO(glyph_Yellow)
 EQUB LO(glyph_White)
 
-include "intermediate/font/razor14x14/code/Glyphs.6502"
-
-; Add the custom glyphs themselves here
-.glyph_Red
-EQUB 1 ; Line count
-EQUB processedLineCount
-
-.glyph_Green
-EQUB 1 ; Line count
-EQUB processedLineCount+1
-
-.glyph_Blue
-EQUB 1 ; Line count
-EQUB processedLineCount+2
-
-.glyph_Cyan
-EQUB 1 ; Line count
-EQUB processedLineCount+3
-
-.glyph_Magenta
-EQUB 1 ; Line count
-EQUB processedLineCount+4
-
-.glyph_Yellow
-EQUB 1 ; Line count
-EQUB processedLineCount+5
-
-.glyph_White
-EQUB 1 ; Line count
-EQUB processedLineCount+6
+.colourCodes
+EQUB mainColToRed
+EQUB mainColToGreen
+EQUB mainColToBlue
+EQUB mainColToCyan
+EQUB mainColToMagenta
+EQUB mainColToYellow
+EQUB mainColToWhite
 
 include "intermediate/font/razor14x14/code/GlyphLines.6502"
 
@@ -112,6 +90,42 @@ JMP lineReturn
 LDA #mainColToWhite \\2
 JSR LineFX_SetFGColour
 JMP lineReturn
+
+include "intermediate/font/razor14x14/code/Glyphs.6502"
+
+firstColourChangeLineIndex = processedLineCount
+
+; Add the custom glyphs themselves here
+.glyph_Red
+EQUB 1 ; Line count
+EQUB firstColourChangeLineIndex
+
+.glyph_Green
+EQUB 1 ; Line count
+EQUB firstColourChangeLineIndex+1
+
+.glyph_Blue
+EQUB 1 ; Line count
+EQUB firstColourChangeLineIndex+2
+
+.glyph_Cyan
+EQUB 1 ; Line count
+EQUB firstColourChangeLineIndex+3
+
+.glyph_Magenta
+EQUB 1 ; Line count
+EQUB firstColourChangeLineIndex+4
+
+.glyph_Yellow
+EQUB 1 ; Line count
+EQUB firstColourChangeLineIndex+5
+
+.glyph_White
+EQUB 1 ; Line count
+EQUB firstColourChangeLineIndex+6
+
+lastColourChangeLineIndex = firstColourChangeLineIndex+6
+
 
 \\ Function to change the background colour and, if this is the 'top' line, record the 'start' colour so the 'topmost' colour
 \\ can be re-applied at the beginning of FX render (or at end of FX update)

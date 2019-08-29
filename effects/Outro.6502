@@ -19,7 +19,7 @@
 .OutroRender
 {
     ; Wait until near to the beginning of the visible frame.
-    JSR wait128
+    ;JSR wait128
     WAIT_40
 
 
@@ -91,48 +91,49 @@ LDA #LO(OutroEnd)
 STA effectCleanupTableHigh + fxIndex_Outro
 LDA #HI(OutroEnd)
 STA effectCleanupTableLow + fxIndex_Outro
+
+; During the previous effect we unpack the starting image to shadow memory while using main memory to render.
+; So at the start of this effect we make sure to render from shadow memory.
+LDA #1                  ; 4 .. load shadow/main state for this line (in this case 1: render from shadow)
+TSB &FE34               ; 6 .. set bit zero in ACCON (so we render from shadow)
+
 RTS
 
 .timeline_outro
-; As soon as this effect start, start unpacking the first Outro image.
-; (We ran out of time to implement it, but it would have been possible to unpack this image during
-; the previous effect, and then we could have displayed the first image immediately).
-TimelineEntryHeaderForFlag tc_waitType_immediate
-Timeline_BeginDecrunch Outro, 6
-
-; As soon as the decrunch completes, flip the palette to standard Mode2, to display it.
-TimelineEntryHeaderForFlag tc_waitType_decrunchDone
+; Shortly after the effect starts, flip the palette to standard Mode2, to display the first outro image.
+; (The timing is chosen to be 'in sync' with the previous effect's 'fade out' timings)
+TimelineEntryHeader tc_waitType_sinceLastTimelinePoint, 40
 TimelineFunction_2Arg fl_fnIndex_setPaletteMode2, HI(paldata_mode2), LO(paldata_mode2)
 
-; And immediately start decrunching the final goodbye image, but to shadow memory.
+; And immediately start decrunching the final goodbye image, but to main memory.
 TimelineEntryHeaderForFlag tc_waitType_immediate
-Timeline_BeginDecrunch Goodbye, 6 OR decrunchFlags_ToShadowMemory
+Timeline_BeginDecrunch Goodbye, 6
 
 ; Wait for 5 seconds, then start a task that copies the shadow/main state from the 'all shadow'
 ; table into the current ('all main') table, using random indices.
 TimelineEntryHeader tc_waitType_sinceLastTimelinePoint, 250
-Timeline_BeginTaskCopyData lineShadowTableFromShadow, lineShadowTable, 0, 1, 256
+Timeline_BeginTaskCopyData lineShadowTableFromMain, lineShadowTable, 0, 1, 256
 
-; Wait again for a bit longer than 5 seconds, then start decrunching a pure black image into main RAM...
-TimelineEntryHeader tc_waitType_sinceLastTimelinePoint, 270
-Timeline_BeginDecrunch Black, 6
+; Wait again for 5 seconds, then start decrunching a pure black image into main RAM...
+TimelineEntryHeader tc_waitType_sinceLastTimelinePoint, 260
+Timeline_BeginDecrunch Black, 6 OR decrunchFlags_ToShadowMemory
 
 ; ... and as soon as it's decrunched, spawn another task to copy back the 'render from main' values
 ; There is a bug here: This was supposed to fade the final image to black, but instead it seemed to randomly fade
 ; some of the lines to black but then back to visible again. It looked like a nice effect, so we left it as-is!
 TimelineEntryHeaderForFlag tc_waitType_decrunchDone
-Timeline_BeginTaskCopyData lineShadowTableFromMain, lineShadowTable, 0, 1, 256
+Timeline_BeginTaskCopyData lineShadowTableFromShadow, lineShadowTable, 0, 1, 256
 
 ; And finally we end the demo! Wait for 10 seconds, then jump to the next effect, which will run the shutdown code
 ; for this effect, which will reset the machine!
-TimelineEntryHeader tc_waitType_sinceLastTimelinePoint, 500
+TimelineEntryHeader tc_waitType_sinceLastTimelinePoint, 450
 TimelineFunction_1Arg tl_fnIndex_swapToEffect, 255
 
 
 ALIGN &100
 .lineShadowTable  ; This table is used per-line to determine whether to render from shadow or main memory.
 FOR N, 0, 255
-EQUB 0 ; Render from main memory.
+EQUB 1 ; Render from shadow memory.
 NEXT
 
 .lineShadowTableFromShadow

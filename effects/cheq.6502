@@ -902,7 +902,7 @@ equs text_two_parts
 equs text_wait,100
 equs text_set_colour,mode2_8
 equs text_set_outline_colour,mode2_7
-equs "     THE END     "
+equs "    THE END      "
 equs text_wait,50
 equs text_set_outline_colour,mode2_1
 equs text_set_outline_colour,mode2_3
@@ -910,6 +910,18 @@ equs text_scroll_dir,1,$ff
 equs "                    "		; 20x
 equs "THANKS FOR WATCHING!"
 equs "                    "		; 20x
+equs text_wait,50
+equs text_set_colour3,PAL_black
+equs text_wait,50
+equs text_set_colour2,PAL_black
+equs text_wait,50
+equs text_set_colour1,PAL_black
+equs text_wait,50
+; Now that everything is black apart from the scrolltext bar in the middle, we make
+; that disappear by reverting to the 'no scrolltext bar' layout.
+equs text_one_part
+
+
 ; equs text_scroll_dir,0,0
 ; equs text_scroll_dir,1,0
 equs text_wait,255
@@ -973,7 +985,11 @@ Timeline_BeginDecrunch cheq_font_packed,SLOT_CHEQ_FONT ; ~50 frames
 TimelineEntryHeader tc_waitType_sinceLastTimelinePoint, 60
 Timeline_SetZPValue scrolling,1
 
-TimelineEntryHeader tc_waitType_sinceLastTimelinePoint, 700
+TimelineEntryHeaderForFlag tc_waitType_immediate
+Timeline_BeginDecrunch Outro, 6 OR decrunchFlags_ToShadowMemory
+
+; was 700 below
+TimelineEntryHeader tc_waitType_sinceLastTimelinePoint, 900
 TimelineFunction_1Arg tl_fnIndex_swapToEffect, fxIndex_ResetCRTC
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
