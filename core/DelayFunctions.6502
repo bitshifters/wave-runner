@@ -1,0 +1,40 @@
+;*************************************
+; Functions that can be called to waste a defined number of CPU cycles.
+;
+; The intention was to create a number of functions that could take arguments saying how many
+; cycles to waste, but in the end all we needed was wait128.
+;
+;*************************************
+
+; Wait for exactly 128 cycles including the time taken to jump to and return to the subroutine.
+.wait128
+\\ 9x JSR/RTS = 9x12 = 108 cycles...
+JSR waitRTS
+.wait116
+JSR waitRTS
+.wait104
+JSR waitRTS
+.wait92
+JSR waitRTS
+.wait80
+JSR waitRTS
+.wait68
+JSR waitRTS
+.wait56
+JSR waitRTS
+.wait44
+JSR waitRTS
+.wait32
+JSR waitRTS
+.wait20
+NOP
+.wait18
+NOP
+.wait16
+NOP
+.wait14
+NOP \\ +8 -> 116 cycles.
+\\ ... 116 cycles within this fn, plus the JSR that brought us here and the RTS that returns, sums to 128 cycles!
+.wait12
+.waitRTS
+RTS

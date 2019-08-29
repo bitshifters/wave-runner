@@ -1,0 +1,50 @@
+;*************************************
+; Definitions to assist writing code that uses the System and User VIAs.
+;
+;*************************************
+
+viaReg_InOutB = 0
+viaReg_InOutA = 1
+viaReg_DataDirectionB = 2
+viaReg_DataDirectionA = 3
+viaReg_T1CounterLow = 4
+viaReg_T1CounterHigh = 5
+viaReg_T1LatchLow = 6
+viaReg_T1LatchHigh = 7
+viaReg_T2CounterLow = 8
+viaReg_T2CounterHigh = 9
+viaReg_Shift = 10
+viaReg_AuxControl = 11
+viaReg_PeripheralControl = 12
+viaReg_InterruptFlags = 13
+viaReg_InterruptEnable = 14
+viaReg_InOutA_NoHandshake = 15
+
+userViaStart = &FE60
+sysViaStart = &FE40
+
+userViaFlags = userViaStart + viaReg_InterruptFlags
+userViaIER = userViaStart + viaReg_InterruptEnable
+
+sysViaFlags = sysViaStart + viaReg_InterruptFlags
+sysViaIER = sysViaStart + viaReg_InterruptEnable
+
+viaBit_Flags_CA2   = &01
+viaBit_Flags_CA1   = &02
+viaBit_Flags_Shift = &04
+viaBit_Flags_CB2   = &08
+viaBit_Flags_CB1   = &10
+viaBit_Flags_T2    = &20
+viaBit_Flags_T1    = &40
+viaBit_Flags_AnyIrq = &80
+
+sysViaBit_Flags_VSync = viaBit_Flags_CA1
+
+viaBit_IER_CA2   = &01
+viaBit_IER_CA1   = &02
+viaBit_IER_Shift = &04
+viaBit_IER_CB2   = &08
+viaBit_IER_CB1   = &10
+viaBit_IER_T2    = &20
+viaBit_IER_T1    = &40
+viaBit_IER_SetClear = &80

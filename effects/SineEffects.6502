@@ -1,0 +1,1211 @@
+;*************************************
+; Effect: Vertical double sine wave (aka the 'sine wibble' effect)
+;
+; This effect uses stable raster palette-changing to render a superposition of two sine waves on
+; the right of the screen. Each wave can have its left/right movement speed and vertical scale adjusted
+; independently, and by choosing values carefully a variety of nice-looking patterns can be created.
+;
+; To achieve effect, two sine waves (varying between the values 0 and 14) are summed together (giving a possible
+; range of 0-28) and then the result is used to chose from one of 29 hand-crafted functions. Each of these functions
+; essentially does:
+; - Wait(first)
+; - Write to palette register to change logical colour &F to a colour
+; - Wait(second)
+; - Write to palette to change coloru &F back to black.
+; 
+; ... where wait(first) and wait(second) always sum to the same value, and in addition the code that calculates
+; the colour value to use must be interleaved among the 'wait' and 'write palette' instructions.
+;
+; The coloured effects are achieved by looking up into a 256-entry table of palette values. Each line, a 16-bit
+; addition is used to step forward to the 'next' colour value. This allows for stepping through the table at
+; fractional rates, and by choosing different step speeds, it is possible to create different colour movement patterns.
+;
+; The change from black to coloured is done by changing the palette for logical colour &F. This means that the right
+; hand side of the screen must be filled entirely with &F. However, on the left of the screen, it is possible to display
+; any MODE1 image (with any palette as long as logical colour &F is set to black). As the effect runs a number of
+; different images are decrunched into the screen memory and changes are made to the palette.
+;
+; The 'fade waves up down' effect (which is used to change between patterns) is done by patching the code that loads
+; from the sine table to refer to a variety of different tables which were pre-generated for different amplitudes.
+;
+; The initial fade from white to coloured, and the final fade from coloured to black, is done by spawning tasks which
+; copy values from tables of colours (palette entries) to the 'actual' colour table.
+;
+;*************************************
+
+; Effect slots.
+
+; Where in sin table we START FROM each frame ie how far through the table the pattern 'starts' at top of screen.
+;   ie this is how far left/right the pattern's top line is.
+sineEffects_Wave1_StartIndexLow = effectVariables + 0
+sineEffects_Wave1_StartIndexHigh = effectVariables + 1
+
+; Speed at which the start of the sin pattern (top of screen) moves through the sin table, aka speed at which the screen 'window'
+; onto the sine wave shifts up/down.
+sineEffects_Wave1_xWibbleSpeedLow    = effectVariables + 2
+sineEffects_Wave1_xWibbleSpeedHigh   = effectVariables + 3
+
+; Offset to add into the sin pattern for every line down the screen, ie, the scale of the pattern
+sineEffects_Wave1_yScaleFactorLow         = effectVariables + 4
+sineEffects_Wave1_yScaleFactorHigh        = effectVariables + 5
+
+; Similar variables, but for a second wave which is added to the first.
+sineEffects_Wave2_StartIndexLow  = effectVariables + 9
+sineEffects_Wave2_StartIndexHigh   = effectVariables + 10
+sineEffects_Wave2_xWibbleSpeedLow  = effectVariables + 11
+sineEffects_Wave2_xWibbleSpeedHigh = effectVariables + 12
+sineEffects_Wave2_yScaleFactorLow    = effectVariables + 13
+sineEffects_Wave2_yScaleFactorHigh   = effectVariables + 14
+
+; Now we have variables which track the state of the pattern from top to bottom of screen, ie ones which
+; change on every line as the beam is scanning.
+
+; 16-bit offset into the sine table, incremented per-line as the pattern is drawn
+; (High byte is used as the offset. Low byte is fractional part).
+sineEffects_Wave1_PerLineIndexLow = effectVariables + 6
+sineEffects_Wave1_PerLineIndexHigh  = effectVariables + 7
+
+sineEffects_Wave2_PerLineIndexLow = effectVariables + 15
+sineEffects_Wave2_PerLineIndexHigh = effectVariables + 16
+
+; Amplitudes are 16-bit values, the high-byte must be between 0 and (sineWibbleWaveSize * 2)
+sineEffects_Wave1_AmplitudeLow = effectVariables + 17
+sineEffects_Wave1_AmplitudeHigh = effectVariables + 18
+sineEffects_Wave2_AmplitudeLow = effectVariables + 19
+sineEffects_Wave2_AmplitudeHigh = effectVariables + 20
+
+; Similar values (start index, increment per line, y scale) for the colour pattern.
+sineEffects_ColourStartIndexLow = effectVariables + 21
+sineEffects_ColourStartIndexHigh = effectVariables + 22
+
+sineEffects_ColourIndexPerLineLow = effectVariables + 23
+sineEffects_ColourIndexPerLineHigh = effectVariables + 24
+
+sineEffects_ColourScaleLow = effectVariables + 25
+sineEffects_ColourScaleHigh = effectVariables + 26
+
+sineEffects_ColourShiftLow = effectVariables + 27
+sineEffects_ColourShiftHigh = effectVariables + 28
+
+; Render function (called Thin Sine for historical reasons!)
+ALIGN &100
+.ThinSineStart
+{
+    ; Delay until near start of first scanline.
+    JSR wait128
+    WAIT_40
+
+    ldy #0  \\ 256 lines. 
+    .loop
+
+    \\ Add to offset into table...
+    \\ 40 cycles just for the two adds!!!
+
+    ; Step the 'current offset in sine table' forward by the scale factor variable, once for each wave.
+    ; TODO: Could these two adds be sped up by turning the read of the constant that is added each line
+    ; into an 'add immediate' and patching up the code each frame so the constant is different?... Ie use
+    ; SixteenBitAddConstant and patch up the constant value each frame...?
+    SixteenBitAdd sineEffects_Wave2_PerLineIndexHigh, sineEffects_Wave2_PerLineIndexLow, sineEffects_Wave2_yScaleFactorHigh, sineEffects_Wave2_yScaleFactorLow
+    SixteenBitAdd sineEffects_Wave1_PerLineIndexHigh, sineEffects_Wave1_PerLineIndexLow, sineEffects_Wave1_yScaleFactorHigh, sineEffects_Wave1_yScaleFactorLow
+
+    ; Now that we have the sine table indices for both waves, we retrieve the values from the sine table, add
+    ; them together (which will give a value between 0 and 28) and then jump to one of the 28 functions whose
+    ; addresses are stored in delayTable.
+
+    TAX ; 2 ... This is putting wave1 per-line high into X ...
+    .^loadSinTableWave1
+    LDA sintableThin,X ; 4
+    LDX sineEffects_Wave2_PerLineIndexHigh ; 3
+    CLC
+    .^loadSinTableWave2
+    ADC sintableThin,X ; 4 ... and adding wave2 per-line high to it... 
+
+    ; shift left is because delayTable stores function pointers in one table (16-bit values stored in two-byte chunks)
+    ; not in two separate tables.
+    ASL A
+    TAX
+
+    ; Jump to the appropriate function.
+    JMP (delayTable,X)
+
+.^thinSinReturn
+
+    dey \ 2 == 125
+    bne loop \ 3 == 128
+    jmp EffectRenderReturn
+}
+.ThinSineEnd
+
+.ThinSineUpdate
+
+; Lots of debugging code for changing the pattern using the keyboard. Not used in final demo.
+LDA #1
+STA isShiftPressed
+
+LDA #&00 \\ Left shift -- 10x multiplier on how much to add/subtract for the other keys
+STA &FE4F
+LDA &FE4F  \ N flag = whether key is pressed
+BPL shiftNotPressed
+LDA #10
+STA isShiftPressed
+.shiftNotPressed
+LDA #&01 \\ Ctrl -- really speed up (add 50)
+STA &FE4F
+LDA &FE4F  \ N flag = whether key is pressed
+BPL ctrlNotPressed
+LDA #50
+STA isShiftPressed
+.ctrlNotPressed
+LDA #&19 \\ cursor Left -- decrease sine shift speed
+STA &FE4F
+LDA &FE4F  \ N flag = whether key is pressed
+BPL cursorbarLeftNotPressed
+SixteenBitSubEightBit sineEffects_Wave1_xWibbleSpeedHigh, sineEffects_Wave1_xWibbleSpeedLow, isShiftPressed
+.cursorbarLeftNotPressed
+LDA #&79 \\ cursor right -- increase sine shift speed
+STA &FE4F
+LDA &FE4F  \ N flag = whether key is pressed
+BPL cursorRightNotPressed
+SixteenBitAddEightBit sineEffects_Wave1_xWibbleSpeedHigh, sineEffects_Wave1_xWibbleSpeedLow, isShiftPressed
+.cursorRightNotPressed
+LDA #&29 \\ cursor down -- decrease sine scale
+STA &FE4F
+LDA &FE4F  \ N flag = whether key is pressed
+BPL cursorDownNotPressed
+SixteenBitSubEightBit sineEffects_Wave1_yScaleFactorHigh, sineEffects_Wave1_yScaleFactorLow, isShiftPressed
+.cursorDownNotPressed
+LDA #&39 \\ cursor up -- increase sine scale
+STA &FE4F
+LDA &FE4F  \ N flag = whether key is pressed
+BPL cursorUpNotPressed
+SixteenBitAddEightBit sineEffects_Wave1_yScaleFactorHigh, sineEffects_Wave1_yScaleFactorLow, isShiftPressed
+.cursorUpNotPressed
+LDA #&41 \\ A -- decrease width shift speed
+STA &FE4F
+LDA &FE4F  \ N flag = whether key is pressed
+BPL aNotPressed
+;SixteenBitSubEightBit sineEffects_Wave2_xWibbleSpeedHigh, sineEffects_Wave2_xWibbleSpeedLow, isShiftPressed
+SixteenBitSubEightBit sineEffects_ColourShiftHigh, sineEffects_ColourShiftLow, isShiftPressed
+.aNotPressed
+LDA #&32 \\ D -- increase width shift speed
+STA &FE4F
+LDA &FE4F  \ N flag = whether key is pressed
+BPL dNotPressed
+;SixteenBitAddEightBit sineEffects_Wave2_xWibbleSpeedHigh, sineEffects_Wave2_xWibbleSpeedLow, isShiftPressed
+SixteenBitAddEightBit sineEffects_ColourShiftHigh, sineEffects_ColourShiftLow, isShiftPressed
+.dNotPressed
+LDA #&51 \\ S -- decrease width scale
+STA &FE4F
+LDA &FE4F  \ N flag = whether key is pressed
+BPL sNotPressed
+;SixteenBitSubEightBit sineEffects_Wave2_yScaleFactorHigh, sineEffects_Wave2_yScaleFactorLow, isShiftPressed
+SixteenBitSubEightBit sineEffects_ColourScaleHigh, sineEffects_ColourScaleLow, isShiftPressed
+.sNotPressed
+LDA #&21 \\ W -- increase width scale
+STA &FE4F
+LDA &FE4F  \ N flag = whether key is pressed
+BPL wNotPressed
+;SixteenBitAddEightBit sineEffects_Wave2_yScaleFactorHigh, sineEffects_Wave2_yScaleFactorLow, isShiftPressed
+SixteenBitAddEightBit sineEffects_ColourScaleHigh, sineEffects_ColourScaleLow, isShiftPressed
+.wNotPressed
+
+LDA #&33 \\ R -- reset pattern
+STA &FE4F
+LDA &FE4F  \ N flag = whether key is pressed
+BPL rNotPressed
+LDA #0
+STA sineEffects_Wave2_yScaleFactorHigh
+STA sineEffects_Wave2_yScaleFactorLow
+STA sineEffects_Wave1_yScaleFactorLow
+STA sineEffects_Wave1_yScaleFactorHigh
+STA sineEffects_Wave1_xWibbleSpeedHigh
+STA sineEffects_Wave1_xWibbleSpeedLow
+STA sineEffects_Wave2_xWibbleSpeedHigh
+STA sineEffects_Wave2_xWibbleSpeedLow
+.rNotPressed
+
+; END keyboard input (debugging code)
+
+; Now we get to the main processing for the thin sin update: Changing the sin shift (where in the pattern
+; the first line of screen starts)
+
+SixteenBitAdd sineEffects_ColourStartIndexHigh, sineEffects_ColourStartIndexLow, sineEffects_ColourShiftHigh, sineEffects_ColourShiftLow
+    STA sineEffects_ColourIndexPerLineHigh
+
+SixteenBitAdd sineEffects_Wave1_StartIndexHigh, sineEffects_Wave1_StartIndexLow, sineEffects_Wave1_xWibbleSpeedHigh, sineEffects_Wave1_xWibbleSpeedLow
+    STA sineEffects_Wave1_PerLineIndexHigh
+
+SixteenBitAdd sineEffects_Wave2_StartIndexHigh, sineEffects_Wave2_StartIndexLow, sineEffects_Wave2_xWibbleSpeedHigh, sineEffects_Wave2_xWibbleSpeedLow
+    STA sineEffects_Wave2_PerLineIndexHigh
+
+    ; Set up per-line variables ready for next frame! (This needs to be done in effect prepare fn as well!)
+    ; TODO: Could be slightly more efficient by doing the stores to the per-line vars inline with the 16-bit adds above.
+    LDA sineEffects_Wave1_StartIndexLow
+    STA sineEffects_Wave1_PerLineIndexLow
+
+    LDA sineEffects_Wave2_StartIndexLow
+    STA sineEffects_Wave2_PerLineIndexLow
+
+    LDA sineEffects_ColourStartIndexLow
+    STA sineEffects_ColourIndexPerLineLow
+
+
+    ; Patch up the code to use the correct sin table, based on wave amplitudes...
+    LDA #HI(sintableThin)
+    TAX
+    CLC
+    ADC sineEffects_Wave1_AmplitudeHigh
+    STA loadSinTableWave1 + 2
+    TXA
+    ; Shouldn't need a CLC here as the addition above will never generate one...?
+    ;CLC
+    ADC sineEffects_Wave2_AmplitudeHigh
+    STA loadSinTableWave2 + 2
+
+    JMP EffectUpdateReturn
+    .ThinSineUpdateEnd
+
+
+.ThinSineSetup
+; Set back to MODE1, make sure effect workspace is clear, and choose appropriate palette.
+JSR ZeroEffectWorkspace
+
+LDA #&D8
+STA &FE20
+
+LDA #HI(paldata_mode1_FlipBlackWhite)
+LDY #LO(paldata_mode1_FlipBlackWhite)
+JSR SetPalette_Mode1
+
+RTS
+
+; Insert four points into the timeline which execute immediately after one another,
+; to set new values for the two sine waves. This is what changes the animated pattern. 
+MACRO SET_WAVE_VALUES sinceLast, xWibbleSpeed1, yScaleFactor1, xWibbleSpeed2, yScaleFactor2
+TimelineEntryHeader tc_waitType_sinceLastTimelinePoint, sinceLast
+Timeline_SetZPValue_16bit sineEffects_Wave1_xWibbleSpeedLow, xWibbleSpeed1
+TimelineEntryHeader tc_waitType_sinceLastTimelinePoint, 1
+Timeline_SetZPValue_16bit sineEffects_Wave1_yScaleFactorLow, yScaleFactor1
+TimelineEntryHeader tc_waitType_sinceLastTimelinePoint, 1
+Timeline_SetZPValue_16bit sineEffects_Wave2_xWibbleSpeedLow, xWibbleSpeed2
+TimelineEntryHeader tc_waitType_sinceLastTimelinePoint, 1
+Timeline_SetZPValue_16bit sineEffects_Wave2_yScaleFactorLow, yScaleFactor2
+ENDMACRO
+
+; Similar macro to insert consecutive timeline points to change the speed/scale of the colour shifting
+MACRO SET_COLOUR_VALUES sinceLast, colourScale, colourShift
+TimelineEntryHeader tc_waitType_sinceLastTimelinePoint, sinceLast
+Timeline_SetZPValue_16bit sineEffects_ColourShiftLow, colourShift
+TimelineEntryHeader tc_waitType_sinceLastTimelinePoint, 1
+Timeline_SetZPValue_16bit sineEffects_ColourScaleLow, colourScale
+ENDMACRO
+
+; Insert timeline points that spawn tasks that bring up the amplitude of the waves from 0 to max
+MACRO WAVES_UP startTime, overTime
+TimelineEntryHeader tc_waitType_sinceEffectStart, startTime
+Timeline_BeginTaskInterpolateFromAToB sineEffects_Wave1_AmplitudeLow, overTime, 1, 14 * 256
+TimelineEntryHeader tc_waitType_sinceEffectStart, startTime + 1
+Timeline_BeginTaskInterpolateFromAToB sineEffects_Wave2_AmplitudeLow, overTime, 1, 14 * 256
+ENDMACRO
+
+; Similar macro that interpolates the wave amplitube down from max to 0
+MACRO WAVES_DOWN startTime, overTime
+TimelineEntryHeader tc_waitType_sinceEffectStart, startTime
+Timeline_BeginTaskInterpolateFromAToB sineEffects_Wave1_AmplitudeLow, overTime, 14 * 256, 1
+TimelineEntryHeader tc_waitType_sinceEffectStart, startTime + 1
+Timeline_BeginTaskInterpolateFromAToB sineEffects_Wave2_AmplitudeLow, overTime, 14 * 256, 1
+ENDMACRO
+
+
+.timeline_doubleSine
+; As soon as the effect starts, kick off two tasks that copy 'white' into the main colour table.
+; We used two tasks, one which starts at index 0, one which starts at 1, both of them incrementing
+; by two each time, which has the effect of copying at twice the rate. This takes around 2.5 seconds.
+; Using just one task (taking 5s) took too long.
+TimelineEntryHeaderForFlag tc_waitType_immediate
+Timeline_BeginTaskCopyData colourTableWhite, colourTable, 0, 2, 128
+TimelineEntryHeaderForFlag tc_waitType_immediate
+Timeline_BeginTaskCopyData colourTableWhite, colourTable, 1, 2, 128
+
+; Set palette to render the first image in monochrome black/white
+TimelineEntryHeaderForFlag tc_waitType_immediate
+TimelineFunction_2Arg fl_fnIndex_setPaletteMode1, HI(paldata_mode1_Minx2Mono), LO(paldata_mode1_Minx2Mono)
+
+; Start decrunching the first image into screen memory. This has the effect of making it appear over several
+; seconds, starting at the bottom of the screen and finishing at the top.
+TimelineEntryHeaderForFlag tc_waitType_immediate
+Timeline_BeginDecrunch Minx2b, 4
+
+.pattern1
+; Note that all of the above timeline entries were processed one after the other, which only took four frames.
+; The next thing we do is set the colour and wave parameters for the first pattern...
+SET_COLOUR_VALUES 1, &0032, &FDBD
+
+; Assume wave amplitudes start at zero. Immediately set the values for the first pattern.
+SET_WAVE_VALUES 1, &0204, &0495, &0352, &FF96
+; At 3 seconds: Take one second to interpolate both waves to full amplitude
+WAVES_UP 150, 50
+; At 6 seconds: Take one second to interpolate amplitude back to zero.
+WAVES_DOWN 299, 50
+
+; While the wave amplitudes are going to zero, start copying colour values into the colour table.
+; This will take around 5s (there are 256 entries) to turn the pattern from white to coloured.
+TimelineEntryHeaderForFlag tc_waitType_immediate
+Timeline_BeginTaskCopyData colourTableCopper, colourTable, 0, 1, 256
+
+; Set a new palette, to turn the first image from monochrome to tri-colour (white plus green).
+TimelineEntryHeader tc_waitType_sinceLastTimelinePoint, 1
+TimelineFunction_2Arg fl_fnIndex_setPaletteMode1, HI(paldata_mode1_Minx2TriCol), LO(paldata_mode1_Minx2TriCol)
+
+; The rest of the timeline continues in much the same manner.
+
+.pattern2
+; Set values for second pattern
+SET_WAVE_VALUES 39, &FB9D, &0800, &FF92, &08C1
+; At 3 seconds: Take one second to interpolate both waves to full amplitude
+WAVES_UP 346, 50
+; At 6 seconds: Take one second to interpolate amplitude back to zero.
+WAVES_DOWN 600, 50
+
+TimelineEntryHeader tc_waitType_sinceLastTimelinePoint, 1
+TimelineFunction_2Arg fl_fnIndex_setPaletteMode1, HI(paldata_mode1_Minx2Final), LO(paldata_mode1_Minx2Final)
+
+.pattern3
+TimelineEntryHeader tc_waitType_sinceLastTimelinePoint, 1
+Timeline_BeginDecrunch Minx2c, 4
+
+SET_WAVE_VALUES 40, &FDA6, &FC0D, &FF92, &0957
+WAVES_UP 655, 50
+
+;Request screen clear. First we set the mask to vertical stripes
+TimelineEntryHeaderForFlag tc_waitType_immediate
+Timeline_SetAddressToValue_8bit screenClearWithMaskByte+1, %11001100
+
+; Then we request the clear itself. This clears the screen but in vertical stripes.
+TimelineEntryHeaderForFlag tc_waitType_immediate
+Timeline_SetAddressToValue_8bit clearScreenRequested, cf_setUsingMask
+WAVES_DOWN 848, 50
+
+; Set a mask which is the other part of the vertical stripes
+TimelineEntryHeaderForFlag tc_waitType_immediate
+Timeline_SetAddressToValue_8bit screenClearWithMaskByte+1, %00110011
+
+; ... and request another clear. End result is that screen is totally black (filled with &F).
+TimelineEntryHeaderForFlag tc_waitType_immediate
+Timeline_SetAddressToValue_8bit clearScreenRequested, cf_setUsingMask
+
+TimelineEntryHeader tc_waitType_sinceLastTimelinePoint, 80
+TimelineFunction_2Arg fl_fnIndex_setPaletteMode1, HI(paldata_mode1_Minx2Mono), LO(paldata_mode1_Minx2Mono)
+
+.pattern4
+TimelineEntryHeader tc_waitType_sinceLastTimelinePoint, 1
+Timeline_BeginDecrunch BitShift1, 4
+
+SET_WAVE_VALUES 39, &FDA6, &8084, &FF92, &0957
+WAVES_UP 1000, 50
+WAVES_DOWN 1200, 50
+
+.pattern5
+SET_COLOUR_VALUES 1, &03DA, &01F0
+SET_WAVE_VALUES 38, &FEA0, &84F9, &F73C, &0973
+WAVES_UP 1250, 50
+TimelineEntryHeaderForFlag tc_waitType_immediate
+TimelineFunction_2Arg fl_fnIndex_setPaletteMode1, HI(paldata_mode1_BS1), LO(paldata_mode1_BS1)
+WAVES_DOWN 1500, 50
+
+TimelineEntryHeaderForFlag tc_waitType_immediate
+Timeline_BeginDecrunch BitShift2b, 5
+
+.pattern6
+SET_WAVE_VALUES 40, &0833, &A748, &FCE6, &01D6
+WAVES_UP 1550, 50
+WAVES_DOWN 1800, 50
+
+.pattern7
+TimelineEntryHeaderForFlag tc_waitType_immediate
+TimelineFunction_2Arg fl_fnIndex_setPaletteMode1, HI(paldata_mode1_Minx2Final), LO(paldata_mode1_Minx2Final)
+
+SET_WAVE_VALUES 40, &7DD2, &808F, &03B2, &0106
+WAVES_UP 1848, 50
+TimelineEntryHeaderForFlag tc_waitType_immediate
+Timeline_BeginTaskCopyData colourTableBlack, colourTable, 0, 1, 256
+WAVES_DOWN 2100, 50
+
+; Wait one second, then swap to next effect
+TimelineEntryHeader tc_waitType_sinceLastTimelinePoint, 50
+TimelineFunction_1Arg tl_fnIndex_swapToEffect, fxIndex_Scrolltext
+
+
+; A whole bunch of very similar functions that each perform the palette-swap at a different point...
+.delay_0
+    NOP
+    ; First part of a 16-bit add: low byte of (colour index per line + colour scale)
+    LDA sineEffects_ColourIndexPerLineLow ; 3
+    ADC sineEffects_ColourScaleLow ; 3
+    STA sineEffects_ColourIndexPerLineLow ; 3
+
+    ; At this point, we've added the low byte, we have carry flag set appropriately... so we can load the 'current'
+    ; high byte, store it to palette reg, and then get on with adding the high addend to it.
+    LDX sineEffects_ColourIndexPerLineHigh ; 3
+    LDA colourTable,X    ;4
+
+    ; Additional wait before store to palette register.
+    WAIT_16
+    STA &FE21
+
+    ; then need another 17 cycles before the store of black colour (ie 15 before the LDA #im (black colour))
+    TXA ; 2 -- put index-per-line-high back into A
+    ADC sineEffects_ColourScaleHigh ; 3
+    STA sineEffects_ColourIndexPerLineHigh ; 3
+    WAIT_3
+    lda #mainColToBlack \ 2
+    sta &FE21 \ 4
+    JMP thinSinReturn
+
+; And now there are 28 more functions which do basically the same thing, but with the first store to the palette
+; register in a different place...
+.delay_1
+    NOP ; 2
+    LDA sineEffects_ColourIndexPerLineLow ; 3
+    ADC sineEffects_ColourScaleLow ; 3
+    STA sineEffects_ColourIndexPerLineLow ; 3
+
+    LDX sineEffects_ColourIndexPerLineHigh ; 3
+    LDA colourTable,X    ;4
+
+    WAIT_15
+    STA &FE21
+
+    TXA ; 2 -- put index-per-line-high back into A
+    ADC sineEffects_ColourScaleHigh ; 3
+    STA sineEffects_ColourIndexPerLineHigh ; 3
+    WAIT_4
+    lda #mainColToBlack \ 2
+    sta &FE21 \ 4
+    JMP thinSinReturn
+
+.delay_2
+    NOP ; 2
+    LDA sineEffects_ColourIndexPerLineLow ; 3
+    ADC sineEffects_ColourScaleLow ; 3
+    STA sineEffects_ColourIndexPerLineLow ; 3
+
+    LDX sineEffects_ColourIndexPerLineHigh ; 3
+    LDA colourTable,X    ;4
+
+    WAIT_14
+    STA &FE21
+
+    TXA ; 2 -- put index-per-line-high back into A
+    ADC sineEffects_ColourScaleHigh ; 3
+    STA sineEffects_ColourIndexPerLineHigh ; 3
+    WAIT_5
+    lda #mainColToBlack \ 2
+    sta &FE21 \ 4
+    JMP thinSinReturn
+
+.delay_3
+    NOP ; 2
+    LDA sineEffects_ColourIndexPerLineLow ; 3
+    ADC sineEffects_ColourScaleLow ; 3
+    STA sineEffects_ColourIndexPerLineLow ; 3
+
+    LDX sineEffects_ColourIndexPerLineHigh ; 3
+    LDA colourTable,X    ;4
+
+    WAIT_13
+    STA &FE21
+
+    TXA ; 2 -- put index-per-line-high back into A
+    ADC sineEffects_ColourScaleHigh ; 3
+    STA sineEffects_ColourIndexPerLineHigh ; 3
+    WAIT_6
+    lda #mainColToBlack \ 2
+    sta &FE21 \ 4
+    JMP thinSinReturn
+
+.delay_4
+    NOP ; 2
+    LDA sineEffects_ColourIndexPerLineLow ; 3
+    ADC sineEffects_ColourScaleLow ; 3
+    STA sineEffects_ColourIndexPerLineLow ; 3
+
+    LDX sineEffects_ColourIndexPerLineHigh ; 3
+    LDA colourTable,X    ;4
+
+    WAIT_12
+    STA &FE21
+
+    TXA ; 2 -- put index-per-line-high back into A
+    ADC sineEffects_ColourScaleHigh ; 3
+    STA sineEffects_ColourIndexPerLineHigh ; 3
+    WAIT_7
+    lda #mainColToBlack \ 2
+    sta &FE21 \ 4
+    JMP thinSinReturn
+
+.delay_5
+    NOP ; 2
+    LDA sineEffects_ColourIndexPerLineLow ; 3
+    ADC sineEffects_ColourScaleLow ; 3
+    STA sineEffects_ColourIndexPerLineLow ; 3
+
+    LDX sineEffects_ColourIndexPerLineHigh ; 3
+    LDA colourTable,X    ;4
+
+    WAIT_11
+    STA &FE21
+
+    TXA ; 2 -- put index-per-line-high back into A
+    ADC sineEffects_ColourScaleHigh ; 3
+    STA sineEffects_ColourIndexPerLineHigh ; 3
+    WAIT_8
+    lda #mainColToBlack \ 2
+    sta &FE21 \ 4
+    JMP thinSinReturn
+
+.delay_6
+    NOP ; 2
+    LDA sineEffects_ColourIndexPerLineLow ; 3
+    ADC sineEffects_ColourScaleLow ; 3
+    STA sineEffects_ColourIndexPerLineLow ; 3
+
+    LDX sineEffects_ColourIndexPerLineHigh ; 3
+    LDA colourTable,X    ;4
+
+    WAIT_10
+    STA &FE21
+
+    TXA ; 2 -- put index-per-line-high back into A
+    ADC sineEffects_ColourScaleHigh ; 3
+    STA sineEffects_ColourIndexPerLineHigh ; 3
+    WAIT_9
+    lda #mainColToBlack \ 2
+    sta &FE21 \ 4
+    JMP thinSinReturn
+
+.delay_7
+    NOP ; 2
+    LDA sineEffects_ColourIndexPerLineLow ; 3
+    ADC sineEffects_ColourScaleLow ; 3
+    STA sineEffects_ColourIndexPerLineLow ; 3
+
+    LDX sineEffects_ColourIndexPerLineHigh ; 3
+    LDA colourTable,X    ;4
+
+    WAIT_9
+    STA &FE21
+
+    TXA ; 2 -- put index-per-line-high back into A
+    ADC sineEffects_ColourScaleHigh ; 3
+    STA sineEffects_ColourIndexPerLineHigh ; 3
+    WAIT_10
+    lda #mainColToBlack \ 2
+    sta &FE21 \ 4
+    JMP thinSinReturn
+
+.delay_8
+    NOP ; 2
+    LDA sineEffects_ColourIndexPerLineLow ; 3
+    ADC sineEffects_ColourScaleLow ; 3
+    STA sineEffects_ColourIndexPerLineLow ; 3
+
+    LDX sineEffects_ColourIndexPerLineHigh ; 3
+    LDA colourTable,X    ;4
+
+    WAIT_8
+    STA &FE21
+
+    TXA ; 2 -- put index-per-line-high back into A
+    ADC sineEffects_ColourScaleHigh ; 3
+    STA sineEffects_ColourIndexPerLineHigh ; 3
+    WAIT_11
+    lda #mainColToBlack \ 2
+    sta &FE21 \ 4
+    JMP thinSinReturn
+
+.delay_9
+    NOP ; 2
+    LDA sineEffects_ColourIndexPerLineLow ; 3
+    ADC sineEffects_ColourScaleLow ; 3
+    STA sineEffects_ColourIndexPerLineLow ; 3
+
+    LDX sineEffects_ColourIndexPerLineHigh ; 3
+    LDA colourTable,X    ;4
+
+    WAIT_7
+    STA &FE21
+
+    TXA ; 2 -- put index-per-line-high back into A
+    ADC sineEffects_ColourScaleHigh ; 3
+    STA sineEffects_ColourIndexPerLineHigh ; 3
+    WAIT_12
+    lda #mainColToBlack \ 2
+    sta &FE21 \ 4
+    JMP thinSinReturn
+
+.delay_10
+    NOP ; 2
+    LDA sineEffects_ColourIndexPerLineLow ; 3
+    ADC sineEffects_ColourScaleLow ; 3
+    STA sineEffects_ColourIndexPerLineLow ; 3
+
+    LDX sineEffects_ColourIndexPerLineHigh ; 3
+    LDA colourTable,X    ;4
+
+    WAIT_6
+    STA &FE21
+
+    TXA ; 2 -- put index-per-line-high back into A
+    ADC sineEffects_ColourScaleHigh ; 3
+    STA sineEffects_ColourIndexPerLineHigh ; 3
+    WAIT_13
+    lda #mainColToBlack \ 2
+    sta &FE21 \ 4
+    JMP thinSinReturn 
+
+.delay_11
+    NOP ; 2
+    LDA sineEffects_ColourIndexPerLineLow ; 3
+    ADC sineEffects_ColourScaleLow ; 3
+    STA sineEffects_ColourIndexPerLineLow ; 3
+
+    LDX sineEffects_ColourIndexPerLineHigh ; 3
+    LDA colourTable,X    ;4
+
+    WAIT_5
+    STA &FE21
+
+    TXA ; 2 -- put index-per-line-high back into A
+    ADC sineEffects_ColourScaleHigh ; 3
+    STA sineEffects_ColourIndexPerLineHigh ; 3
+    WAIT_14
+    lda #mainColToBlack \ 2
+    sta &FE21 \ 4
+    JMP thinSinReturn
+
+.delay_12
+    NOP ; 2
+    LDA sineEffects_ColourIndexPerLineLow ; 3
+    ADC sineEffects_ColourScaleLow ; 3
+    STA sineEffects_ColourIndexPerLineLow ; 3
+
+    LDX sineEffects_ColourIndexPerLineHigh ; 3
+    LDA colourTable,X    ;4
+
+    WAIT_4
+
+    STA &FE21
+
+    TXA ; 2 -- put index-per-line-high back into A
+    ADC sineEffects_ColourScaleHigh ; 3
+    STA sineEffects_ColourIndexPerLineHigh ; 3
+    WAIT_15
+    lda #mainColToBlack \ 2
+    sta &FE21 \ 4
+    JMP thinSinReturn
+
+.delay_13
+    NOP ; 2
+    LDA sineEffects_ColourIndexPerLineLow ; 3
+    ADC sineEffects_ColourScaleLow ; 3
+    STA sineEffects_ColourIndexPerLineLow ; 3
+
+    LDX sineEffects_ColourIndexPerLineHigh ; 3
+    LDA colourTable,X    ;4
+
+    WAIT_3
+
+    STA &FE21
+
+    TXA ; 2 -- put index-per-line-high back into A
+    ADC sineEffects_ColourScaleHigh ; 3
+    STA sineEffects_ColourIndexPerLineHigh ; 3
+    WAIT_16
+    lda #mainColToBlack \ 2
+    sta &FE21 \ 4
+    JMP thinSinReturn
+
+.delay_14
+    NOP ; 2
+    LDA sineEffects_ColourIndexPerLineLow ; 3
+    ADC sineEffects_ColourScaleLow ; 3
+    STA sineEffects_ColourIndexPerLineLow ; 3
+
+    LDX sineEffects_ColourIndexPerLineHigh ; 3
+    LDA colourTable,X    ;4
+
+    WAIT_2
+
+    STA &FE21
+
+    TXA ; 2 -- put index-per-line-high back into A
+    ADC sineEffects_ColourScaleHigh ; 3
+    STA sineEffects_ColourIndexPerLineHigh ; 3
+    WAIT_17
+    lda #mainColToBlack \ 2
+    sta &FE21 \ 4
+    JMP thinSinReturn
+
+.delay_15
+    NOP ; 2
+    LDA sineEffects_ColourIndexPerLineLow ; 3
+    ADC sineEffects_ColourScaleLow ; 3
+    STA sineEffects_ColourIndexPerLineLow ; 3
+
+    LDX sineEffects_ColourIndexPerLineHigh ; 3
+    LDA colourTable,X    ;4
+
+    WAIT_1
+
+    STA &FE21
+
+    TXA ; 2 -- put index-per-line-high back into A
+    ADC sineEffects_ColourScaleHigh ; 3
+    STA sineEffects_ColourIndexPerLineHigh ; 3
+    WAIT_18
+    lda #mainColToBlack \ 2
+    sta &FE21 \ 4
+    JMP thinSinReturn
+
+.delay_16
+    NOP ; 2
+    LDA sineEffects_ColourIndexPerLineLow ; 3
+    ADC sineEffects_ColourScaleLow ; 3
+    STA sineEffects_ColourIndexPerLineLow ; 3
+
+    LDX sineEffects_ColourIndexPerLineHigh ; 3
+    LDA colourTable,X    ;4
+
+    STA &FE21
+
+    TXA ; 2 -- put index-per-line-high back into A
+    ADC sineEffects_ColourScaleHigh ; 3
+    STA sineEffects_ColourIndexPerLineHigh ; 3
+    WAIT_19
+    lda #mainColToBlack \ 2
+    sta &FE21 \ 4
+    JMP thinSinReturn
+
+.delay_17
+    NOP ; 2
+    WAIT_9
+
+    LDX sineEffects_ColourIndexPerLineHigh ; 3
+    LDA colourTable,X    ;4
+    STA &FE21
+
+    LDA sineEffects_ColourIndexPerLineLow ; 3
+    ADC sineEffects_ColourScaleLow ; 3
+    STA sineEffects_ColourIndexPerLineLow ; 3
+
+    TXA ; 2 -- put index-per-line-low back into A
+    ADC sineEffects_ColourScaleHigh ; 3
+    STA sineEffects_ColourIndexPerLineHigh ; 3
+    WAIT_10
+    lda #mainColToBlack \ 2
+    sta &FE21 \ 4
+    JMP thinSinReturn
+
+.delay_18
+    NOP ; 2
+    WAIT_8
+
+    LDX sineEffects_ColourIndexPerLineHigh ; 3
+    LDA colourTable,X    ;4
+    STA &FE21
+
+    LDA sineEffects_ColourIndexPerLineLow ; 3
+    ADC sineEffects_ColourScaleLow ; 3
+    STA sineEffects_ColourIndexPerLineLow ; 3
+
+    TXA ; 2 -- put index-per-line-low back into A
+    ADC sineEffects_ColourScaleHigh ; 3
+    STA sineEffects_ColourIndexPerLineHigh ; 3
+    WAIT_11
+    lda #mainColToBlack \ 2
+    sta &FE21 \ 4
+    JMP thinSinReturn
+
+.delay_19
+    NOP ; 2
+    WAIT_7
+
+    LDX sineEffects_ColourIndexPerLineHigh ; 3
+    LDA colourTable,X    ;4
+    STA &FE21
+
+    LDA sineEffects_ColourIndexPerLineLow ; 3
+    ADC sineEffects_ColourScaleLow ; 3
+    STA sineEffects_ColourIndexPerLineLow ; 3
+
+    TXA ; 2 -- put index-per-line-low back into A
+    ADC sineEffects_ColourScaleHigh ; 3
+    STA sineEffects_ColourIndexPerLineHigh ; 3
+    WAIT_12
+    lda #mainColToBlack \ 2
+    sta &FE21 \ 4
+    JMP thinSinReturn
+
+.delay_20
+    NOP ; 2
+    WAIT_6
+
+    LDX sineEffects_ColourIndexPerLineHigh ; 3
+    LDA colourTable,X    ;4
+    STA &FE21
+
+    LDA sineEffects_ColourIndexPerLineLow ; 3
+    ADC sineEffects_ColourScaleLow ; 3
+    STA sineEffects_ColourIndexPerLineLow ; 3
+
+    TXA ; 2 -- put index-per-line-low back into A
+    ADC sineEffects_ColourScaleHigh ; 3
+    STA sineEffects_ColourIndexPerLineHigh ; 3
+    WAIT_13
+    lda #mainColToBlack \ 2
+    sta &FE21 \ 4
+    JMP thinSinReturn
+
+.delay_21
+    NOP ; 2
+    WAIT_5
+
+    LDX sineEffects_ColourIndexPerLineHigh ; 3
+    LDA colourTable,X    ;4
+    STA &FE21
+
+    LDA sineEffects_ColourIndexPerLineLow ; 3
+    ADC sineEffects_ColourScaleLow ; 3
+    STA sineEffects_ColourIndexPerLineLow ; 3
+
+    TXA ; 2 -- put index-per-line-low back into A
+    ADC sineEffects_ColourScaleHigh ; 3
+    STA sineEffects_ColourIndexPerLineHigh ; 3
+    WAIT_14
+    lda #mainColToBlack \ 2
+    sta &FE21 \ 4
+    JMP thinSinReturn
+
+.delay_22
+    NOP ; 2
+    WAIT_4
+
+    LDX sineEffects_ColourIndexPerLineHigh ; 3
+    LDA colourTable,X    ;4
+    STA &FE21
+
+    LDA sineEffects_ColourIndexPerLineLow ; 3
+    ADC sineEffects_ColourScaleLow ; 3
+    STA sineEffects_ColourIndexPerLineLow ; 3
+
+    TXA ; 2 -- put index-per-line-low back into A
+    ADC sineEffects_ColourScaleHigh ; 3
+    STA sineEffects_ColourIndexPerLineHigh ; 3
+    WAIT_15
+    lda #mainColToBlack \ 2
+    sta &FE21 \ 4
+    JMP thinSinReturn
+
+.delay_23
+    NOP ; 2
+    WAIT_3
+
+    LDX sineEffects_ColourIndexPerLineHigh ; 3
+    LDA colourTable,X    ;4
+    STA &FE21
+
+    LDA sineEffects_ColourIndexPerLineLow ; 3
+    ADC sineEffects_ColourScaleLow ; 3
+    STA sineEffects_ColourIndexPerLineLow ; 3
+
+    TXA ; 2 -- put index-per-line-low back into A
+    ADC sineEffects_ColourScaleHigh ; 3
+    STA sineEffects_ColourIndexPerLineHigh ; 3
+    WAIT_16
+    lda #mainColToBlack \ 2
+    sta &FE21 \ 4
+    JMP thinSinReturn
+
+.delay_24
+    NOP ; 2
+    WAIT_2
+
+    LDX sineEffects_ColourIndexPerLineHigh ; 3
+    LDA colourTable,X    ;4
+    STA &FE21
+
+    LDA sineEffects_ColourIndexPerLineLow ; 3
+    ADC sineEffects_ColourScaleLow ; 3
+    STA sineEffects_ColourIndexPerLineLow ; 3
+
+    TXA ; 2 -- put index-per-line-low back into A
+    ADC sineEffects_ColourScaleHigh ; 3
+    STA sineEffects_ColourIndexPerLineHigh ; 3
+    WAIT_17
+    lda #mainColToBlack \ 2
+    sta &FE21 \ 4
+    JMP thinSinReturn
+
+.delay_25
+    NOP ; 2
+    WAIT_1
+
+    LDX sineEffects_ColourIndexPerLineHigh ; 3
+    LDA colourTable,X    ;4
+    STA &FE21
+
+    LDA sineEffects_ColourIndexPerLineLow ; 3
+    ADC sineEffects_ColourScaleLow ; 3
+    STA sineEffects_ColourIndexPerLineLow ; 3
+
+    TXA ; 2 -- put index-per-line-low back into A
+    ADC sineEffects_ColourScaleHigh ; 3
+    STA sineEffects_ColourIndexPerLineHigh ; 3
+    WAIT_18
+    lda #mainColToBlack \ 2
+    sta &FE21 \ 4
+    JMP thinSinReturn
+
+ .delay_26
+    NOP ; 2
+
+    LDX sineEffects_ColourIndexPerLineHigh ; 3
+    LDA colourTable,X    ;4
+    STA &FE21
+
+    LDA sineEffects_ColourIndexPerLineLow ; 3
+    ADC sineEffects_ColourScaleLow ; 3
+    STA sineEffects_ColourIndexPerLineLow ; 3
+
+    TXA ; 2 -- put index-per-line-low back into A
+    ADC sineEffects_ColourScaleHigh ; 3
+    STA sineEffects_ColourIndexPerLineHigh ; 3
+    WAIT_19
+    lda #mainColToBlack \ 2
+    sta &FE21 \ 4
+    JMP thinSinReturn
+
+
+.delay_27
+
+    WAIT_1
+    LDX sineEffects_ColourIndexPerLineHigh ; 3
+    LDA colourTable,X    ;4
+    STA &FE21
+
+    NOP ; 2
+
+    LDA sineEffects_ColourIndexPerLineLow ; 3
+    ADC sineEffects_ColourScaleLow ; 3
+    STA sineEffects_ColourIndexPerLineLow ; 3
+
+    TXA ; 2 -- put index-per-line-high back into A
+    ADC sineEffects_ColourScaleHigh ; 3
+    STA sineEffects_ColourIndexPerLineHigh ; 3
+    WAIT_18
+    lda #mainColToBlack \ 2
+    sta &FE21 \ 4
+    JMP thinSinReturn
+
+.delay_28
+    LDX sineEffects_ColourIndexPerLineHigh ; 3
+    LDA colourTable,X    ;4
+    STA &FE21
+
+    NOP ; 2
+
+    LDA sineEffects_ColourIndexPerLineLow ; 3
+    ADC sineEffects_ColourScaleLow ; 3
+    STA sineEffects_ColourIndexPerLineLow ; 3
+
+    TXA ; 2 -- put index-per-line-low back into A
+    ADC sineEffects_ColourScaleHigh ; 3
+    STA sineEffects_ColourIndexPerLineHigh ; 3
+    WAIT_19
+    lda #mainColToBlack \ 2
+    sta &FE21 \ 4
+    JMP thinSinReturn
+
+; Addresses of each of the preceeding 29 functions.
+.delayTable
+    EQUB LO(delay_28)
+    EQUB HI(delay_28)
+    EQUB LO(delay_27)
+    EQUB HI(delay_27)
+    EQUB LO(delay_26)
+    EQUB HI(delay_26)
+    EQUB LO(delay_25)
+    EQUB HI(delay_25)
+    EQUB LO(delay_24)
+    EQUB HI(delay_24)
+    EQUB LO(delay_23)
+    EQUB HI(delay_23)
+    EQUB LO(delay_22)
+    EQUB HI(delay_22)
+    EQUB LO(delay_21)
+    EQUB HI(delay_21)
+    EQUB LO(delay_20)
+    EQUB HI(delay_20)
+    EQUB LO(delay_19)
+    EQUB HI(delay_19)
+    EQUB LO(delay_18)
+    EQUB HI(delay_18)
+    EQUB LO(delay_17)
+    EQUB HI(delay_17)
+    EQUB LO(delay_16)
+    EQUB HI(delay_16)
+    EQUB LO(delay_15)
+    EQUB HI(delay_15)
+    EQUB LO(delay_14)
+    EQUB HI(delay_14)
+    EQUB LO(delay_13)
+    EQUB HI(delay_13)
+    EQUB LO(delay_12)
+    EQUB HI(delay_12)
+    EQUB LO(delay_11)
+    EQUB HI(delay_11)
+    EQUB LO(delay_10)
+    EQUB HI(delay_10)
+    EQUB LO(delay_9)
+    EQUB HI(delay_9)
+    EQUB LO(delay_8)
+    EQUB HI(delay_8)
+    EQUB LO(delay_7)
+    EQUB HI(delay_7)
+    EQUB LO(delay_6)
+    EQUB HI(delay_6)
+    EQUB LO(delay_5)
+    EQUB HI(delay_5)
+    EQUB LO(delay_4)
+    EQUB HI(delay_4)
+    EQUB LO(delay_3)
+    EQUB HI(delay_3)
+    EQUB LO(delay_2)
+    EQUB HI(delay_2)
+    EQUB LO(delay_1)
+    EQUB HI(delay_1)
+    EQUB LO(delay_0)
+    EQUB HI(delay_0)
+
+; There are now several tables containing 256 palette entries all of the form 'set colour &F to <something>'
+ALIGN &100
+
+; This is the one actually referenced by the effect code. Node that it starts black, but is later filled in with
+; values from the other tables.
+.colourTable
+FOR N, 0, 255
+    EQUB colFToBlack
+NEXT
+.colourTableEnd
+
+ASSERT (colourTableEnd - colourTable) = 256
+
+; Used towards the end of the effect. Entries from this are copied over to colourTable to 'fade out' the pattern.
+.colourTableBlack
+FOR N, 0, 255
+    EQUB colFToBlack
+NEXT
+
+; Yes, this is wasteful! 256 entries all the same value. This is used near the start to make the effect 'appear' by
+; turning the pattern from black to white.
+.colourTableWhite
+FOR N, 0, 255
+    EQUB colFToWhite
+NEXT
+
+; This was an experiment which wasn't used in the final demo.
+.colourTableWhiteRed
+FOR N, 0, 127
+    EQUB colFToWhite
+    EQUB colFToRed
+NEXT
+
+; Also never used!
+ALIGN &100
+.colourTable2
+FOR N, 0, 79
+EQUB colFToRed
+NEXT
+FOR N, 0, 79
+EQUB colFToGreen
+NEXT
+FOR N, 0, 255 - 160
+EQUB colFToBlue
+NEXT
+
+; This is the only table of colours actually used by the effect! This is copied over into colourTable a few
+; seconds after the effect starts, thus turning the pattern from white to coloured.
+ALIGN &100
+.colourTableCopper
+FOR N, 0, 19 ; 21
+    EQUB colFToRed
+NEXT
+FOR N, 0, 10 ; 12 * 2 = 24
+    EQUB colFToYellow
+    EQUB colFToRed
+NEXT
+FOR N, 0, 20 ; 22
+    EQUB colFToYellow
+NEXT
+FOR N, 0, 10 ; 12 * 2 = 24
+    EQUB colFToGreen
+    EQUB colFToYellow
+NEXT
+FOR N, 0, 20 ; 22
+    EQUB colFToGreen
+NEXT
+FOR N, 0, 10 ; 12 * 2 = 24
+    EQUB colFToCyan
+    EQUB colFToGreen
+NEXT
+FOR N, 0, 19 ; 21
+    EQUB colFToCyan
+NEXT
+FOR N, 0, 10 ; 12 * 2 = 24
+    EQUB colFToBlue
+    EQUB colFToCyan
+NEXT
+FOR N, 0, 20 ; 22
+    EQUB colFToBlue
+NEXT
+FOR N, 0, 10 ; 12 * 2 = 24
+    EQUB colFToMagenta
+    EQUB colFToBlue
+NEXT
+FOR N, 0, 20 ; 22
+    EQUB colFToMagenta
+NEXT
+FOR N, 0, 10 ; 12 * 2 = 24
+    EQUB colFToRed
+    EQUB colFToMagenta
+NEXT
+.colourTableCopperEnd
+
+ts = (colourTableCopperEnd - colourTableCopper)
+PRINT "COPPER TABLE SIZE: ", ts
+ASSERT (colourTableCopperEnd - colourTableCopper) = 256
+
+include "sinTables.6502"
+
+ALIGN &100
+.randomTable
+EQUB 74, 177, 220, 50, 142, 46, 63, 241, 88, 96, 128, 206, 7, 20, 230, 31
+EQUB 218, 193, 121, 54, 148, 127, 253, 116, 130, 139, 95, 126, 75, 62, 16, 176
+EQUB 227, 131, 108, 168, 140, 213, 156, 124, 111, 91, 112, 157, 18, 204, 25, 202
+EQUB 180, 200, 52, 26, 170, 179, 145, 217, 21, 65, 78, 160, 86, 48, 99, 254
+EQUB 24, 169, 190, 225, 150, 2, 27, 188, 57, 113, 103, 68, 250, 186, 56, 191
+EQUB 249, 134, 58, 33, 185, 41, 15, 109, 245, 79, 49, 165, 1, 167, 152, 207
+EQUB 28, 219, 229, 92, 143, 175, 195, 94, 215, 172, 38, 248, 35, 5, 97, 137
+EQUB 146, 85, 129, 222, 105, 205, 192, 210, 221, 243, 211, 161, 189, 72, 110, 181
+EQUB 236, 30, 14, 133, 10, 82, 36, 90, 223, 76, 118, 163, 115, 173, 83, 233
+EQUB 77, 66, 159, 197, 84, 98, 237, 209, 174, 104, 187, 154, 228, 199, 42, 123
+EQUB 242, 244, 238, 132, 71, 32, 47, 158, 149, 231, 106, 117, 162, 138, 51, 184
+EQUB 239, 201, 22, 43, 122, 93, 164, 81, 59, 80, 224, 4, 119, 9, 87, 70
+EQUB 125, 64, 141, 73, 61, 247, 69, 6, 151, 17, 226, 196, 246, 89, 11, 53
+EQUB 135, 194, 198, 120, 102, 60, 23, 67, 0, 234, 252, 182, 240, 8, 107, 232
+EQUB 183, 45, 144, 235, 166, 34, 216, 214, 136, 37, 40, 55, 44, 19, 13, 171
+EQUB 178, 153, 203, 3, 29, 100, 147, 101, 39, 208, 251, 12, 212, 114, 155, 255
+.randomTableEnd
+
+ASSERT (randomTableEnd - randomTable) = 256

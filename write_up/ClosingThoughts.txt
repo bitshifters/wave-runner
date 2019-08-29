@@ -1,0 +1,14 @@
+Closing thoughts
+
+Before I get to anything else, I'd like to reiterate that Wave Runner was a team effort. Myself and Tom Seddon did the framework and effects code, the music compression and playback came from SimonM (via Twisted Brain), HexWab helped out with music player speedups (and also prototyped the stable raster system which I started playing around with a year ago as an introduction to 6502 coding!), and it wouldn't have been half the demo without Dethmunk's graphics. Beyond that numberous other people helped out in all kinds of ways, from making suggestions and contributing code snippets, patching JSBeeb, and so on. It would never have been made without a spirit of positive collaboration.
+
+A few closing thoughts:
+
+[list]
+[*]If anyone was wondering why the scrolltext sometimes changes colour towards the top of the screen, it's basically a bug: the control code that is meant to change the colour of the text doesn't get recorded in the 'last colour-change that left the top of the screen' variable. If we ever do a v1.1 release that's the first thing I'll be patching!
+[*]The 'background' exomizer decompression was great. You can decompress an entire screen in 4-5 seconds using the CPU cycles that are spare between the end of the 'Update' loop and the start of the next frame. It helped us reduce the time spent staring at a black screen while the demo decrunches stuff. We could have made more use of it for some of the later effects.
+[*]There's still quite a way to go before we start pushing at the edge of the Master's capabilities, both audibly and visually. There was memory spare at the end of development, and there are plenty of techniques still to discovered. (Combining stable raster and vertical rupture, for instance!) ... So expect another demo at some point!
+[*]We'll be releasing the sourcecode soon. Just need to do a few final tidy-ups.
+[*]And that's it. We hope you enjoyed it!
+[/list]
+

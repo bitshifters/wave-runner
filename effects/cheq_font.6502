@@ -1,0 +1,5 @@
+.cheq_font_packed:incbin "intermediate/anuvverbubbla_8x8.exo"
+
+; where the font is unpacked to.
+cheq_font_dest=$2000
+ASSERT (cheq_font_dest AND $fff)=0

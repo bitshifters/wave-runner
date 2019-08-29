@@ -1,0 +1,12 @@
+Introduction
+
+Wave Runner Demo Details
+
+In a similar manner to Kieran's Twisted Brain write-up last year, I'm going to describe how Wave Runner works under the hood, as well as providing some details about its genesis and how it all came together.
+
+I'm hoping to get all the parts written over the next two weeks, time permitting. I'll block out a number of posts for the stuff I want to talk about, and fill them in as and when they're ready. Several demo effects (as well as a lot of the build system and all kinds of other things!) were done by Tom Seddon and with luck he'll have time to describe his work, so I'll block out parts for those as well.
+
+Rough plan is to do a high-level introduction to the demo framework, talk a bit about Stable Raster, NOP Slides and Clockslides, then move onto a description of each of the effects, and finish up with some closing thoughts.
+
+So, without further ado... Let's make a start with a Framework Overview.
+

@@ -1,0 +1,95 @@
+The Demo Framework
+
+Wave Runner is heavily influenced by, and shares some code with, Twisted Brain (hereafter known as 'TB') There will be places in this write-up where it's easier to refer to TB and describe how Wave Runner is different than to describe how Wave Runner works in detail.
+
+Similarities with TB include:
+
+- Both demos have a 'Render' function which runs while the Video ULA is scanning out the visible portion of the frame, followed by a number of 'Update' functions which do music decompression and playback, run 'Update' code for the current effect, and do 'Scripting' (deciding what other code to run each frame).
+- They music playback is very similar. Exomizer Decompression to decompress up to 11 bytes per frame, that are sent to the SN chip immediately after the 'Render' function completes.
+
+
+Significant differences include:
+
+- Wave Runner uses fully Stable Raster (cycle-accurate timing with respect to the Video ULA output). It achieves this by use of a NOP slide, of which more later.
+- The 'Effect Render' function starts approximately 192 cycles (ie 1.5 scanlines) *before* the start of the visible frame. This is to allow the render function to do any 'preparation' necessary before the effects starts rendering.
+- Wave Runner runs with interrupts enabled (although only the System Via Timer1 is enabled). This has some positive   ramifications as described shortly.
+- TB used Exomizer 'streaming' compression to decrunch the music stream, and PuCrunch to decompress images and data. WR uses two separate Exomizer decompressors, one in 'Streaming' mode (for the music) and one in 'Targetted' mode (for all other decompression).
+- WR has the ability to run code 'in the background'. It is interrupted once per frame to run the entirety of the Render/Update loop, but then returns to a loop which can be doing useful stuff like Exomizer decompression or clearing the screen, that runs until the T1 interrupt triggers the next Render/Update loop.
+- The music player was heavily optimised for the Master 128's 65C02 by HexWab.
+
+
+An overview of the Framework
+
+The demo is split into several systems:
+
+- The main 'Render/Update loop': Triggered once per frame, just before the Video ULA starts scanning out the visible frame. Responsible for calling the current effect's Render and Update functions, as well as ticking all the other systems.
+
+- The 'Background Processing' loop: Runs all the time except when interrupted by the Render/Update loop. Responsible for Targetted Exomizer decompression and screen clearing.
+
+- The 'Effect System': Maintains a big table of render/update/startup/shutdown functions for each effect, and is responsible for calling them appropriately to transition between effects. Also manages Sideways RAM banks and Shadow/Main memory state for each effect.
+
+- The 'Task System': Runs up to 6 additional functions per frame. Each task has access to a small block of data containing its arguments. The system can run tasks for a specified number of frames, or until the task function marks itself as complete.
+
+- The 'Timeline'. This reads a stream of bytes in memory and interprets it as instructions such as 'Wait for 60 frames then spawn this task' or 'Wait until the current decrunch has completed and then kick off another decrunch', etc. Timeline points can be relative to the start of the demo, the start of the effect, the last timeline point, or can wait for various 'flags' to be set. Each Effect has its own timeline and some have several timelines used at different points.
+
+- The 'VGM Player'. Decrunches bytes of music data and sends them to the sound chip.
+
+
+
+Memory map
+
+&0000 - &00FF : Zero page. All kinds of stuff that is referred to frequently by the code, e.g. timers tracking how long it's been since the start of the demo, the current effect, and the last 'timeline point', 32 bytes 'effect workspace' that each effect can use for whatever it likes, small buffers needed for the Exomizer decompressers, etc.
+
+&0100 - &01FF : 6502 Stack, but also contains an 156-byte table used by Targetted Exo Decompressor.
+
+&0300 - &0FFF : 3328 byte buffer used by streaming Exo3 decompressor (for music).
+
+&1000 - &1FFF : All the demo framework code, plus several tables of sine values at various amplitudes.
+
+&2000 - &2FFF : 'Effect workspace'. Each effect is free to put whatever code or data it wants here.
+
+&3000 - &7FFF : Screen memory. (The demo runs in a mixture of MODE1 and MODE2, both of which require the full 20k). The demo will often display 'Main' memory while writing a new image to 'Shadow' or vice versa.
+
+&8000 - &BFFF : Sideways RAM banks x 4. Three banks contain the code and data for all the effects, plus the Exo-compressed images. The fourth bank contains the first 16k of the compressed music.
+
+&C000 - &DFFF : HAZEL, which contains the rest of the compressed music, and right at the end an another 156-byte workspace used by the Streaming Exo decompressor.
+
+&E000 - &FFFF : OS ROM, interrupt handling routines etc.
+
+
+
+Notes on memory map:
+
+Exomizer provides a trade-off between the amount of 'workspace' needed at runtime and the compression ratio. By speciifying a larger workspace during the compression step, you can reduce the size of the compressed data. For the music ("Synergy Main Menu" by Scavenger) we were lucky in that using a workspace size of 3328 bytes compresses the music data into 24411 bytes. This fits into one SWR Bank plus most of HAZEL, leaving space for an additional 156 bytes right at the end of HAZEL (used for another small Exo-based workspace) with just 9 bytes free! The 3328-byte workspace fits between &200 and the demo framework code at &1000.
+
+ANDY is not used. It's reserved for future demos when we really start to run out of space. :)
+
+Similarly to TB, we keep HAZEL active all the time (the demo never uses the OS VDU routines and keeps that part of the OS ROM paged out) and the streaming music decompressor runs down through SWR bank 3 and straight into HAZEL.
+
+
+The Render/Update loop
+
+Here's what happens in the IRQ Handler that's triggered by System Via Timer1. (Note many details omitted for clarity!):
+
+- (Housekeeping code that caches X and Y so we can return from the IRQ properly. A is already cached in &FC.)
+- Correct for interrupt jitter to achieve stable raster (see section on NOP slides).
+- Set up SWR and main/shadow state for the current effect.
+- Run 'Render' function for current effect.
+- Run music player.
+- Tick the Timeline System. (This may lead to a transition to the next effect, because all effect transitions are triggered by the effect timelines).
+- Tick the Task System, which will tick all active Tasks.
+- Run 'Update' function for current effect.
+- Deliberately waste several scanline's worth of cycles. Reserving cycles gives us a crude measure of how close to 'CPU capacity' the demo is.
+- (Update the various counters that increment once per frame).
+- Restore Shadow/Main state and SWR bank to those needed for the Background Processing.
+- Restore X, Y and A, and RTI.
+
+The Background Processing loop continuously does the following:
+
+- Check if the "Clear Screen Requested" flag is non-zero. If so, jump to the code that handles screen-clearing.
+- Check if the "Exomizer Decrunch Requested" flag is non-zero. If so, jump to the code that does Exo decompression.
+
+Overall, the system is designed to let you run timing-critical rendering code syncred to the raster beam, but to also run code 'once per frame at some point' or 'in the background as fast as possible'.
+
+
+

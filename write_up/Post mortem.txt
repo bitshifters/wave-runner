@@ -1,0 +1,64 @@
+Wave Runner Post-Mortem -- VectorEyes' notes
+--------------------------------------------
+
+What went right
+---------------
+
+- Collaboration with Tom over Slack worked well. It helped that we keep the same hours. Very positive experience.
+
+- Tom taking my hacked-together prototype and converting it to use make, generally tidying up stuff was really helpful.
+
+- We got lots of new techniques working. Background exo-decompression from SWR to shadow or main RAM, Tom's effects both of which are new (I think?), stable raster, etc.
+
+- Being able to re-use whole chunks of code (music player, exo decompress etc) massively helpful.
+
+- Having access to everyone else's pooled knowledge was invaluable. I can think of several times where I asked questions and got quick helpful replies, which otherwise would have needed hours of research / asking on StarDot.
+
+- Really helpful having people dropping in to do surgical improvements to parts of the codebase, e.g. HexWab speeding up the music player. Also Simon helping with music conversion.
+
+- Jon's graphics were great!
+
+
+What could have gone better
+---------------------------
+
+- It was all thrown together somewhat last-minute. No real 'theme', no original music, etc. Without Dethmunk's 'Wave Runner' name and graphics it just wouldn't have worked and that only went in in the last few weeks. (Although... important to acknowledge that trying various things out and seeing what works is a valid approach and having everything too locked down early on wouldn't allow for experimentation and 'a-ha' moments).
+
+- I had vague plans to ask IP for an original tune. Then HexWab suggested trying to get the high-frequency music working. We pursued that for a while before concluding that we'd have to use the existing 50Hz playback. This wasted several days of time and then I felt uncomfortable asking IP for a tune so close to the deadline (I was really happy when he made one for Horizon instead!)
+
+- Personal note: Over the last few weeks I was averaging 5-6 hours of sleep a night. It's not sustainable and my work performance and physical/mental health suffered a bit. I don't regret it, but I'm not sure it's sensible to do that too often!
+
+- I feel that it could have benefited from one or two more effects. We used the scrolltext as 'filler' but could have cut it down a bit. On the other hand, we might have then needed a slightly longer tune which probably wouldn't have fitted in memory...
+
+- But the biggest regret: Lack of polish time. SOOOO many niggling issues that could have been fixed with even an hour or two extra. Just off the top of my head:
+  - Transition from Chequerboard to next effect is very jarring.
+  - Vertical scrolltext has a bug where the top section is the wrong colour. It was in the back of my mind to fix it for weeks, and I never did!
+  - Several seconds of blank screen between some of the effects could have been mitigated by unpacking the data for the 'next' effect in the background, but we ran out of time.
+  
+  
+Learnings for next projects
+---------------------------
+
+- Focus on infrastructure and build process early. Get build process set up as soon as possble. Some kind of make-based system or whatever, the important thing is that you can clone the repository, build and run really easily. Test every so often by cloning a new copy of the repo and trying to build it! If people want to contribute they need to be able to build/test easily.
+
+- Have a theme and a plan for the effects early. Of course this might evolve or even change drastically, but having some kind of agreed set of goals, aesthetics, etc. helps to get everyone on the same page to begin with. In this regard, Kieran's 'Time and Motion' demo plan he was working on before he had to focus on job-hunting was useful because it gave us a place to start out from.
+
+- Ideally know how long you want the demo to be, have the music ready early on, plan out which effects go where... if you do that, it forces you to think about how effects will transition from one to the next, engage with whether you can realistically run one effect immediately after the other (e.g. if both effects need the effect workspace full of data, then realistically it's difficult to transition from one to the other without having some blank frames to do unpacking.
+
+- Leave LOTS of time for polish. Weeks and weeks. Have a cut-off date beyond which you just don't implement new effects. (Of course you'll then ignore this and try and cram stuff in, but at least you're aware that you really should be polishing at this point!)
+
+- Don't bite off too much. In 2020 I'd like to go to Revision and Nova as well ... but I'm going to think very carefully about whether that's remotely feasible!
+
+
+Tech improvements that will help with future demos
+--------------------------------------------------
+
+- Instead of running the Effect code from Sideways RAM, each effect should be assembled to run from somewhere in the 'Effect workspace' at &2000 - &2FFF. Effects and their associated data could then be Exo-compressed, stored in SWR, and decompressed on the fly during previous effects. ANDY could then be used either as an additional 4k of effect workspace, or as an additional 4k of compressed exo data. (Or indeed both, depending on how you ordered the effects!) This basically saves SWR space -> can cram more stuff into the demo.
+
+- Upgrade the music player to support multi-frame update (ie Hundo-Hz-style SID-emulation. ;) ) This entails all effects having to interleave the effect render code with music playback code. If we really wanted to push the technical boat out, we could consider a system that can transition from Hundo-stylee to 50Hz dynamically. Effects that require 128 cycles-per-line to render would use the 50Hz player. lighter ones would use the >50Hz player. Music would be authored to have some sections that only need 50Hz, others that need higher frequency update...
+
+- Make the timeline system easier to author for. Currently you use an awful lot of hard-coded numbers to trigger events.
+
+- The 1-line vrup effects were developed by 'hacking' the timings until they worked. Would be better to get to the point where you know the exact earliest and latest point that you can change CRTC registers on a scanline to effect the next line.
+
+- The 'recover from 1-line vrup' technique uses a separate effect and requires at least two blank frames. I'd like to see whether it's possible to do all stuff necessary to recover from 1-line vrup during the last frame of the vrup-using effect and the start of the first frame of the subsequent effect. 

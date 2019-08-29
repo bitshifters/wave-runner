@@ -1,0 +1,72 @@
+NOP Slides and Clockslides
+
+In several places the demo needs to delay by an exact number of cycles, but the cycle count is continually changing and only known at runtime. The techniques necessary to do this are out there on the Web, but for those who are interested and/or haven't seen them before I'll go over them briefly.
+
+NOP Slides: When you need to delay by 2N cycles.
+
+The Wave Runner code synchronises itself to the vertical sync interrupt using techniques already described in the Twisted Brain writeup. This gets you an IRQ handler that is called every frame at a known offset from the vsync, but with a few cycles of jitter. (This jitter is caused by several things, most notably the fact that when an interrupt fires, the CPU must wait for the current instruction to finish -- which could take between 1 and 7 cycles -- before servicing the interrupt. Combined with other effects such as cycle stretching when reading the VIAs, in effect you can have up to 8 cycles of jitter.)
+
+To correct for this, you do the following:
+
+- Read Timer1 Low.
+- Extract the lowest 3 bits and invert them. (This gives a value from 0 to 7 where 0 means 'Timer value was large, so correct with a long delay' and 7 means 'Timer value was small, so correct with a short delay'. Remember the counter is counting down, not up!).
+- Write the value into the second byte of a Branch instruction, ie the branch offset.
+- Branch into a series of repeating NOPs.
+
+The code that does this in Wave Runner looks like this:
+
+.aboutToReadT1
+lda sysViaStart + viaReg_T1CounterLow \read T1L, clear interrupt, also sync to 1MHz due to cycle stretching
+.t1lInAReadyToSlide
+; Extract lowest 3 bits, use result to control a NOP slide. This corrects for timer jitter and provides stable raster.
+and #7
+eor #7
+sta branch+1
+.branch
+bpl branch \always
+.slide
+; Note: this slide delays (CPU cycles) by TWICE the 'input' to the slide, which is
+; what we want because the T1 counter is 1MHz, but the CPU runs at 2MHz.
+nop:nop:nop:nop
+nop:nop:cmp &3
+
+Because the 1MHz VIA timers operate at half the speed of the CPU, and NOPS take two cycles, this has the effect of introducing a delay which exactly counteracts the jitter.
+
+Credit goes to Hexwab for detailing this here...
+
+(At this point I have to admit that I have no idea why I put a CMP &3 at the end. It's an easy way to use 3 cycles instead of two, and I suspect it was because at some point I needed to delay for an extra cycle. It might look like I've missed one NOP -- there are only 6 NOPS, but the branch values range from 0 to 7 -- so the code might branch to the "&3" byte of the final CMP, and treat it as an instruction. But on the 65C02, opcode 03 is a one-cycle NOP, which means the jitter correction still works!)
+
+One detail that the original article doesn't mention: the number of cycles between the interrupt firing and reading Timer1 Low is crucial. You need to carefully set up the code so that the Timer1 read is at just the right point within an 8-cycle repeating loop.
+
+So when you want to delay by 2N cycles, use a NOP slide. But what if you want to delay in 1-cycle increments, instead of two?
+
+ClockSlides: When you need to delay by N (+ constant)
+
+The concept of a clockslide is similar to a NOP slide, but by changing the 'control' value you can change how many cycles to waste at one-cycle granularity.
+
+Here's a clockslide that expects a value between 0 and 13 in A, and introduces a delay of between 15 and 2 cycles (not including the cycles for the STA and the BRA):
+
+STA slide+1
+.slide
+BRA slide
+cmp #&C9 : cmp #&C9 : cmp #&C9 : cmp #&C9 : cmp #&C9 : cmp #&C9 : cmp &EA
+
+The way this works is as follows:
+
+- If A is 0, it executes 6 x "CMP #&C9" (CMP immediate, 12 cycles) plus one "CMP &EA" (CMP zero-page, 3 cycles), total: 15
+- If A is 1, it branches to the second (comparison value) byte of the first CMP... which is &C9... which is the opcode for CMP immediate! So it executes 6 x "CMP #&C9" again (12 cycles), but this time at the end, it treats the "&EA" as an instruction which is... NOP (2 cycles). Total: 14.
+- If A is 2, it branches two bytes forward, executes 5 x "CMP #&C9" (10 cycles) plus the final "CMP &EA" (3 cycles). Total: 13.
+... and the pattern repeats all the way down to:
+- If A is 13, it branches straight to the final &EA (NOP) : 2 cycles.
+
+By changing the number of NOPS, you can introduce variable delays up to the limit of the branch instruction.
+
+Interestingly, I started using these techniques before I became aware of the 1-cycle NOPS provided by the 65C02. I think there may be some interesting possibilities for using NOP1s in these 'slide' techniques that have yet to be explored.
+
+
+
+
+
+
+
+

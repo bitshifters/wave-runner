@@ -1,0 +1,75 @@
+EQUS " HELLOb NOVA 19."
+ControlCode_2Arg cc_scrolltextSpeed_2, 6, 0
+EQUS "c CHECKd OUTe THIS"
+ControlCode_2Arg cc_xWibbleSpeed_2, 5, 0
+EQUS "f SCROLLTEXT.    "
+ControlCode_2Arg cc_scrolltextSpeed_2, 3, 127
+ControlCode_2Arg cc_yScale_2, 0, 220
+EQUS "g 0123456789"
+ControlCode_2Arg cc_scrolltextSpeed_2, 3, 0
+EQUS "aAbBcCdDcEaFbGcHdIeJfKgLaMbNcOdPeQfRgSaTbUcVdWeXfYgZ    "
+ControlCode_2Arg cc_yScale_2, 1, 127
+ControlCode_2Arg cc_xWibbleSpeed_2, 127, 0
+EQUS "&'!)("
+EQUS "(:,-$.=^~%+?    "
+
+
+
+
+
+
+
+if 0
+
+.scrolltext0
+ControlCode_2Arg cc_scrolltextSpeed_2, 4, 0
+ControlCode_2Arg cc_yScale_2, 0, 64
+ControlCode_2Arg cc_xWibbleSpeed_2, 0, 0
+EQUS "... "
+ControlCode_BeginTaskSwapBetween8BitValues startColour, 104, 1, mainColToRed, mainColToMagenta
+EQUS "GET READY... . . "
+ControlCode_1Arg cc_setBank_1, 1
+ControlCode_BeginTaskSwapBetween8BitValues startColour, 104, 1, mainColToMagenta, mainColToBlue
+;ControlCode_BeginTaskAdd16BitValue xWibbleSpeedLow, 50 * 20, 10
+EQUS "MAGBLU "
+ControlCode_BeginTaskSwapBetween8BitValues startColour, 104, 1, mainColToBlue, mainColToCyan
+EQUS "BLUCYA "
+ControlCode_BeginTaskSwapBetween8BitValues startColour, 104, 1, mainColToCyan, mainColToGreen
+EQUS "CYANGR "
+ControlCode_BeginTaskSwapBetween8BitValues startColour, 104, 1, mainColToRed, mainColToYellow
+EQUS "ORANGE "
+ControlCode_BeginTaskSwapBetween8BitValues startColour, 104, 1, mainColToBlack, mainColToGreen
+EQUS "DARGRE " 
+ControlCode_BeginTaskSwapBetween8BitValues startColour, 50*2, 1, mainColToWhite, mainColToYellow 
+EQUS "WHIYEL "
+ControlCode_BeginTaskSwapBetween8BitValues startColour, 50*2, 1, mainColToYellow, mainColToGreen 
+EQUS "GREYEL"
+
+EQUS "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+ControlCode_1Arg cc_setBank_1, 1
+.scrolltext0End
+else
+
+
+
+
+
+
+
+
+
+
+;EQUS "..........................................................."
+;ControlCode_1Arg cc_setBank_1, 1
+;ControlCode_2Arg cc_yScale_2, 1, 120
+ControlCode_2Arg cc_xWibbleSpeed_2, 127, 0
+;ControlCode_2Arg cc_yScale_2, 1, 120
+EQUS "OMG!!!"
+EQUS "    "
+;ControlCode_2Arg cc_xWibbleSpeed_2, 0, 0
+EQUS "aTHIS bIS cST d2!!!...."
+ControlCode_1Arg cc_setBank_1, 2
+
+
+
+

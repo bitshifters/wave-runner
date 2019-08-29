@@ -1,0 +1,66 @@
+\\  Need to work out how to get patterns that will create ONE LOGICAL COLOUR uniquely (where desired) and a number of other
+\\  logical colours that we can map to black, for all possible types of pattern (if possible), or work out which patterns
+\\  will 'work' with this technique and which ones won't.
+
+.screenPattern
+
+IF defaultPattern = diagonalPattern
+
+\\ Two-pixel-wide diagonal from top-left to bottom-right
+\\abcdefgh -> acegbdfh          
+\\11110000 -> 11001100 -> CC -> [1010] [1010]  0101   0101
+\\11000011 -> 10011001 -> 99 -> [1010]  0101   0101  [1011]
+\\00001111 -> 00110011 -> 33 ->  0101   0101  [1011] [1011]
+\\00111100 -> 01100110 -> 66 ->  0101  [1010] [1011]  0101
+
+EQUB &CC
+EQUB &99
+EQUB &33
+EQUB &66
+EQUB &CC
+EQUB &99
+EQUB &33
+EQUB &66
+
+ELIF defaultPattern = ditherPattern
+
+\\ Basic stipple pattern
+\\abcdefgh -> acegbdfh  
+\\11001100 -> 10101010 -> &AA -> [1111]  0000  [1111]  0001
+\\00110011 -> 01010101 -> &55 -> 0000   [1111]  0001  [1111]
+\\11001100 -> 10101010 -> &AA
+\\00110011 -> 01010101 -> &55
+EQUB &AA
+EQUB &55
+EQUB &AA
+EQUB &55
+EQUB &AA
+EQUB &55
+EQUB &AA
+EQUB &55
+ENDIF
+
+\\ All possible combinations of 00 and 11
+
+\\abcdefgh -> acegbdfh
+\\00000000 -> 00 00 00 00 -> &00 ->  0000   0000   0001   0001
+\\11000000 -> 10 00 10 00 -> &88 -> [1010]  0000   0101   0001
+\\00110000 -> 01 00 01 00 -> &44 ->  0000  [1010]  0001   0101
+\\00001100 -> 00 10 00 10 -> &22 ->  0101   0000  [1011]  0001
+\\00000011 -> 00 01 00 01 -> &11 ->  0000   0101   0001  [1011]
+\\11110000 -> 11 00 11 00 -> &CC -> [1010] [1010]  0101   0101
+\\00111100 -> 01 10 01 10 -> &66 ->  0101  [1010] [1011]  0101
+\\00001111 -> 00 11 00 11 -> &33 ->  0101   0101  [1011] [1011]
+\\11000011 -> 10 01 10 01 -> &99 -> [1010]  0101   0101  [1011]
+\\11001100 -> 10 10 10 10 -> &AA -> [1111]  0000  [1111]  0001
+\\00110011 -> 01 01 01 01 -> &55 ->  0000  [1111]  0001  [1111]
+\\11111100 -> 11 10 11 10 -> &EE -> [1111] [1010] [1111]  0101
+\\11110011 -> 11 01 11 01 -> &DD -> [1010] [1111]  0101  [1111]
+\\11001111 -> 10 11 10 11 -> &BB -> [1111]  0101  [1111] [1011]
+\\00111111 -> 01 11 01 11 -> &77 ->  0101  [1111] [1011] [1111]
+\\11111111 -> 11 11 11 11 -> &FF -> [1111] [1111] [1111] [1111]
+
+
+
+
+

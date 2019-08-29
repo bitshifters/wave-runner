@@ -1,0 +1,981 @@
+macro must_be_same_page label
+if ((P%-1) and $ff00)<>(label and $ff00)
+PRINT ~P%-1
+PRINT ~label
+error "not on one page..."
+endif
+endmacro
+
+mapchar ' ','~',32
+
+
+align 256
+include "intermediate/cheq_tables.6502"
+
+{
+
+mode2_0=%00000000
+mode2_1=%00000011
+mode2_2=%00001100
+mode2_3=%00001111
+mode2_4=%00110000
+mode2_5=%00110011
+mode2_6=%00111100
+mode2_7=%00111111
+mode2_8=%11000000
+mode2_f=%11111111
+
+middle_base=$6000
+
+middle_width=79
+middle_stride=(middle_width+1)*8
+
+text_src=effectVariables+0					; 2
+text_dest=effectVariables+2					; 2
+text_outline_colour=effectVariables+4		; 1
+text_colour=effectVariables+5				; 1
+glyph_src=effectVariables+6					; 2
+glyph_masked_and_coloured=effectVariables+8	; 1
+glyph_row_counter=effectVariables+9			; 1
+scroll_column_counter=effectVariables+10	; 1
+glyph_dest=effectVariables+11				; 2
+glyph_screen_mask=effectVariables+13		; 1
+scrolling=effectVariables+14				; 1
+text_addr=effectVariables+15				; 2
+delay_counter=effectVariables+17			; 1
+
+; ; effect workspace size is 32...
+
+; status_cheq_font_unpacked=$80	; set if font unpacked
+; status_message=$40				; set if message being drawn
+; status_scroll=$20				; set if scroll in progress
+
+; ; offsets, +1, into scroll_dirs_table
+; scroll_dir_left=1
+; scroll_dir_right=4
+; scroll_dir_up=7
+; scroll_dir_down=10
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+; indexed by character row - index into crtc_addrs_lo/crtc_addrs_hi.
+.row_crtc_addr_index
+equb 0							; 0
+equb 0							; 1
+equb 1							; 2
+equb 1							; 3
+equb 2							; 4
+equb 2							; 5
+equb 3							; 6
+equb 3							; 7
+equb 4							; 8
+equb 4							; 9
+equb 5							; 10
+equb 5							; 11
+equb 6							; 12
+equb 6							; 13
+equb 7							; 14
+equb 7							; 15
+equb 0							; 16
+equb 0							; 17
+equb 1							; 18
+equb 1							; 19
+equb 2							; 20
+equb 2							; 21
+equb 3							; 22
+equb 3							; 23
+equb 4							; 24
+equb 4							; 25
+equb 5							; 26
+equb 5							; 27
+equb 6							; 28
+equb 6							; 29
+equb 7							; 30
+equb 7							; 31
+
+; this value is read, but the settings only affect the invisible area...
+equb 7							;
+
+must_be_same_page row_crtc_addr_index
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+.last_scanline_dispen_table
+equb $00						; 0
+equb $00						; 1
+equb $00						; 2
+equb $00						; 3
+equb $00						; 4
+equb $00						; 5
+equb $00						; 6
+equb $00						; 7
+equb $00						; 8
+equb $00						; 9
+equb $00						; 10
+equb $00						; 11
+equb $00						; 12
+equb $00						; 13
+equb $00						; 14
+equb $00						; 15
+equb $00						; 16
+equb $00						; 17
+equb $00						; 18
+equb $00						; 19
+equb $00						; 20
+equb $00						; 21
+equb $00						; 22
+equb $00						; 23
+equb $00						; 24
+equb $00						; 25
+equb $00						; 26
+equb $00						; 27
+equb $00						; 28
+equb $00						; 29
+equb $00						; 30
+equb $30						; 31
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+num_crtc_addrs=12
+
+.crtc_addrs_lo:skip num_crtc_addrs
+must_be_same_page crtc_addrs_lo
+
+.crtc_addrs_hi:skip num_crtc_addrs
+must_be_same_page crtc_addrs_hi
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+; these could easily be in zero page, but the cycle counting is more
+; convenient this way...
+.cheq_frames:equb 0,0			; 0=top, 1=bottom
+.cheq_dirs:equb 0,0				; 0=top, 1=bottom
+.middle_static:equb 0
+; .middle_crtc_addr_hi:equb 0
+; .middle_crtc_addr_lo:equb 0
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+macro cheq_scanline_0
+
+endmacro
+
+.*cheqRender
+{
+jsr wait128						; +128=128
+jsr wait32						; +32=160
+nop:nop:nop:nop					; +8=168
+lda #4:sta $fe00
+lda #0:sta $fe01
+lda #6:sta $fe00
+lda #255:sta $fe01				; +32=200
+
+.^cheqRender_row0:ldx #0:jsr cheq_row
+.^cheqRender_row1:ldx #1:jsr cheq_row
+.^cheqRender_row2:ldx #2:jsr cheq_row
+.^cheqRender_row3:ldx #3:jsr cheq_row
+.^cheqRender_row4:ldx #4:jsr cheq_row
+.^cheqRender_row5:ldx #5:jsr cheq_row
+.^cheqRender_row6:ldx #6:jsr cheq_row
+.^cheqRender_row7:ldx #7:jsr cheq_row
+.^cheqRender_row8:ldx #8:jsr cheq_row
+.^cheqRender_row9:ldx #9:jsr cheq_row
+.^cheqRender_row10:ldx #10:jsr cheq_row
+.^cheqRender_row11:ldx #11:jsr cheq_row
+.^cheqRender_row12:ldx #12:jsr cheq_row
+.^cheqRender_row13:ldx #13:jsr cheq_row
+.^cheqRender_row14:ldx #14:jsr cheq_row
+.^cheqRender_row15:ldx #15:jsr cheq_row
+.^cheqRender_row16:ldx #16:jsr cheq_row
+.^cheqRender_row17:ldx #17:jsr cheq_row
+.^cheqRender_row18:ldx #18:jsr cheq_row
+.^cheqRender_row19:ldx #19:jsr cheq_row
+.^cheqRender_row20:ldx #20:jsr cheq_row
+.^cheqRender_row21:ldx #21:jsr cheq_row
+.^cheqRender_row22:ldx #22:jsr cheq_row
+.^cheqRender_row23:ldx #23:jsr cheq_row
+.^cheqRender_row24:ldx #24:jsr cheq_row
+.^cheqRender_row25:ldx #25:jsr cheq_row
+.^cheqRender_row26:ldx #26:jsr cheq_row
+.^cheqRender_row27:ldx #27:jsr cheq_row
+.^cheqRender_row28:ldx #28:jsr cheq_row
+.^cheqRender_row29:ldx #29:jsr cheq_row
+.^cheqRender_row30:ldx #30:jsr cheq_row
+.^cheqRender_row31:ldx #31:jsr cheq_row
+if P%-cheqRender_row0<>32*5:error "no":endif
+
+; another 7 rows to complete the full set of 39, with vsync on the
+; 34th.
+lda #4:sta $fe00:lda #6:sta $fe01 ; vertical total
+lda #6:sta $fe00:lda #0:sta $fe01 ; vertical displayed
+lda #7:sta $fe00:lda #3:sta $fe01 ; vsync position
+
+jmp EffectRenderReturn
+
+.^cheq_row
+.scanline_0
+; +8 to get here
+ldy row_crtc_addr_index+1,x		; +4=12
+lda #13:sta $fe00				; +8=20
+lda crtc_addrs_lo,y:sta $fe01	; +10=30
+lda #12:sta $fe00				; +8=38
+lda crtc_addrs_hi,y:sta $fe01	; +10=48
+jsr wait16						; +16=64
+lda #$08:sta $fe00				; +8=72
+lda #$30:sta $fe01				; +8=80
+jsr wait20						; +20=100
+stz $fe01						; +6=106
+jsr wait20						; +20=126
+nop								; +2=128
+
+ldy #$00:jsr scanline_n			; 1
+ldy #$00:jsr scanline_n			; 2
+ldy #$00:jsr scanline_n			; 3
+ldy #$00:jsr scanline_n			; 4
+ldy #$00:jsr scanline_n			; 5
+ldy #$00:jsr scanline_n			; 6
+
+.scanline_7
+jsr wait44						 ; +44=44
+jsr wait20						 ; +20=64
+lda #$08:sta $fe00				 ; +8=72
+lda #$30:sta $fe01				 ; +8=80
+jsr wait20						 ; +20=100
+lda last_scanline_dispen_table,x ; +4=104
+sta $fe01						 ; +6=110
+jsr wait12						 ; +12=122
+rts								 ; +6=128
+
+.^cheqRender_scanline_n
+.scanline_n
+; +8 to get here
+jsr wait56						; +56=64
+lda #$08:sta $fe00				; +8=72
+lda #$30:sta $fe01				; +8=80
+jsr wait20						; +20=100
+sty $fe01						; +6=106
+jsr wait16						; +16=122
+rts								; +6=128
+}
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+.cheq_static_middle_start_row
+{
+; +8 to get here
+ldy row_crtc_addr_index+1,x		; +4=12
+lda #13:sta $fe00				; +8=20
+lda crtc_addrs_lo,y:sta $fe01	; +10=30
+lda #12:sta $fe00				; +8=38
+lda crtc_addrs_hi,y:sta $fe01	; +10=48
+jsr wait16						; +16=64
+lda #$08:sta $fe00				; +8=72
+lda #$30:sta $fe01				; +8=80
+jsr wait20						; +20=100
+stz $fe01						; +6=106
+jsr wait20						; +20=126
+nop								; +2=128
+
+ldy #$00:jsr cheqRender_scanline_n ; 1
+ldy #$00:jsr cheqRender_scanline_n ; 2
+ldy #$00:jsr cheqRender_scanline_n ; 3
+ldy #$30:jsr cheqRender_scanline_n ; 4 - Y=$30
+
+; 5
+
+; set r1
+lda #1:sta $fe00				; +8=8
+lda #middle_width:sta $fe01		; +8=16
+
+; reset palette
+lda #$03:sta $fe21
+lda #$16:sta $fe21
+lda #$25:sta $fe21
+lda #$34:sta $fe21
+lda #$43:sta $fe21
+lda #$52:sta $fe21
+lda #$61:sta $fe21
+lda #$70:sta $fe21
+lda #$87:sta $fe21
+lda #$96:sta $fe21
+lda #$a5:sta $fe21
+lda #$b4:sta $fe21
+lda #$c3:sta $fe21
+lda #$d2:sta $fe21
+lda #$e1:sta $fe21
+lda #$f0:sta $fe21				; +16*6=112
+jsr wait16						; +16=128
+
+; 6/7
+ldy cheq_frames+1				; +4=4
+jsr prepare_frame_crtc_addrs	; +6+134=144
+jsr wait68						; +68=212
+jsr wait20						; +20=232
+lda #$08:sta $fe00				; +8=240
+lda #$00:sta $fe01				; +8=248
+nop								; +2=250
+rts								; +6=256
+; jsr wait104						; +104=248
+; nop								; +2=250
+; rts								; +6=256
+
+; jsr wait32						; +32=144
+; nop:nop							; +4=148
+
+; ; ; set r12
+; ; lda #12:sta $fe00				  ; +8=120
+; ; lda middle_crtc_addr_hi:sta $fe01 ; +10=130
+
+; ; ; set r13
+; ; lda #13:sta $fe00				  ; +8=138
+; ; lda middle_crtc_addr_lo:sta $fe01 ; +10=148
+
+; jsr wait128						; +128=276
+; jsr wait80						; +80=356
+; jsr wait20						; +20=376
+; nop								; +2=378
+; rts								; 378+6=384
+}
+
+.cheq_static_middle_end_row
+{
+; +8 to get here
+lda #1:sta $fe00				   ; +8=16
+lda #96:sta $fe01				   ; +8=24
+ldy cheq_frames+1				   ; +4=28
+jsr prepare_frame_palette		   ; +6+144=178
+jsr wait128						   ; +128=306
+; oops, should really redo this bit...
+jsr wait20						   ; +20=326
+jsr wait20						   ; +20=346
+ldy row_crtc_addr_index+1,x		   ; +4=350
+lda #$08:sta $fe00				   ; +8=358
+stz $fe01						   ; +6=364
+lda #13:sta $fe00				   ; +8=372
+lda crtc_addrs_lo,y:sta $fe01	   ; +10=382
+lda #12:sta $fe00				   ; +8=390
+lda crtc_addrs_hi,y:sta $fe01	   ; +10=400
+jsr wait44						   ; +44=444
+nop								   ; +2=446
+nop								   ; +2=448
+lda #$08:sta $fe00				   ; +8=456
+lda #$30:sta $fe01				   ; +8=464
+jsr wait20						   ; +20=484
+stz $fe01						   ; +6=490
+jsr wait20						   ; +20=510
+nop								   ; +2=512
+ldy #$00:jsr cheqRender_scanline_n ; 4
+ldy #$00:jsr cheqRender_scanline_n ; 5
+ldy #$00:jsr cheqRender_scanline_n ; 6
+jsr wait56						   ; +56=56
+nop:nop:nop:nop					   ; +8=64
+lda #$08:sta $fe00				   ; +8=72
+lda #$30:sta $fe01				   ; +8=80
+jsr wait20						   ; +20=100
+stz $fe01						   ; +6=106
+jsr wait16						   ; +16=122
+rts								   ; +6=128
+}
+
+.cheq_static_middle_row
+{
+; +8 to get here
+lda #13:sta $fe00				; +8=16
+ldy row_crtc_addr_index+1,x		; +4=20
+lda crtc_addrs_lo,y:sta $fe01	; +10=30
+lda #12:sta $fe00				; +8=38
+lda crtc_addrs_hi,y:sta $fe01	; +10=48
+jsr wait80						; +80=128
+jsr wait128						; #1
+jsr wait128						; #2
+jsr wait128						; #3
+jsr wait128						; #4
+jsr wait128						; #5
+jsr wait128						; #6
+jsr wait80						; +80=80
+jsr wait20						; +20=100
+nop								; +2=102
+lda #$08:sta $fe00				; +8=110
+lda last_scanline_dispen_table,x ; +4=114
+sta $fe01						; +6=120
+nop								; +2=122
+rts								; +6=128
+}
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+; Set up CRTC/palette for frame.
+;
+; Y = frame index.
+;
+; preserves X.
+
+.prepare_frame_crtc_addrs
+{
+; set up row CRTC addresses.
+lda cheq_frame_crtc0s_lo,y:sta crtc_addrs_lo+0
+lda cheq_frame_crtc0s_hi,y:sta crtc_addrs_hi+0
+lda cheq_frame_crtc1s_lo,y:sta crtc_addrs_lo+1
+lda cheq_frame_crtc1s_hi,y:sta crtc_addrs_hi+1
+lda cheq_frame_crtc2s_lo,y:sta crtc_addrs_lo+2
+lda cheq_frame_crtc2s_hi,y:sta crtc_addrs_hi+2
+lda cheq_frame_crtc3s_lo,y:sta crtc_addrs_lo+3
+lda cheq_frame_crtc3s_hi,y:sta crtc_addrs_hi+3
+lda cheq_frame_crtc4s_lo,y:sta crtc_addrs_lo+4
+lda cheq_frame_crtc4s_hi,y:sta crtc_addrs_hi+4
+lda cheq_frame_crtc5s_lo,y:sta crtc_addrs_lo+5
+lda cheq_frame_crtc5s_hi,y:sta crtc_addrs_hi+5
+lda cheq_frame_crtc6s_lo,y:sta crtc_addrs_lo+6
+lda cheq_frame_crtc6s_hi,y:sta crtc_addrs_hi+6
+lda cheq_frame_crtc7s_lo,y:sta crtc_addrs_lo+7
+lda cheq_frame_crtc7s_hi,y:sta crtc_addrs_hi+7 ; +16*8=128
+rts											   ; +6=134
+}
+
+.prepare_frame_palette
+{
+stx ldx_old_x+1					; +4=4
+
+; set up palette.
+ldx cheq_frame_palettes,y		; +4=8
+lda cheq_palette+0,x:sta $fe21
+lda cheq_palette+1,x:sta $fe21
+lda cheq_palette+2,x:sta $fe21
+lda cheq_palette+3,x:sta $fe21
+lda cheq_palette+4,x:sta $fe21
+lda cheq_palette+5,x:sta $fe21
+lda cheq_palette+6,x:sta $fe21
+lda cheq_palette+7,x:sta $fe21
+lda cheq_palette+8,x:sta $fe21
+lda cheq_palette+9,x:sta $fe21
+lda cheq_palette+10,x:sta $fe21
+lda cheq_palette+11,x:sta $fe21
+lda cheq_palette+12,x:sta $fe21
+lda cheq_palette+13,x:sta $fe21
+lda cheq_palette+14,x:sta $fe21
+lda cheq_palette+15,x:sta $fe21	; +16*8=136
+
+.ldx_old_x:ldx #$ff				; +2=138
+
+rts								; +6=144
+}
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+.*cheqUpdate
+{
+; update frame indexes.
+ldx #1
+.loop
+clc:lda cheq_frames,x:adc cheq_dirs,x:and #$0f:sta cheq_frames,x
+dex:bpl loop
+
+ldy cheq_frames+0:jsr prepare_frame_crtc_addrs:jsr prepare_frame_palette
+
+; prepare CRTC for first row.
+ldx row_crtc_addr_index+0						; +4=268
+lda #13:sta $fe00:lda crtc_addrs_lo,x:sta $fe01 ; +18=286
+lda #12:sta $fe00:lda crtc_addrs_hi,x:sta $fe01 ; +18=304
+
+lda #8:sta $fe00:stz $fe01
+
+; 96 columns.
+lda #1:sta $fe00:lda #96:sta $fe01
+
+; ; Reset routines.
+; ldx #cheqRender_row31-cheqRender_row0
+; .reset_loop
+; lda #lo(cheq_row):sta cheqRender_row0+3,x
+; lda #hi(cheq_row):sta cheqRender_row0+4,x
+; dex:dex:dex:dex:dex
+; bpl reset_loop
+
+; jsr update_moving_middle
+
+lda delay_counter
+bne handle_delay
+
+jsr update_scroll
+
+jmp EffectUpdateReturn
+
+.handle_delay
+dec delay_counter
+jmp EffectUpdateReturn
+}
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+.update_scroll
+{
+lda scrolling:bne  do_scroll:rts
+
+.do_scroll
+lda scroll_column_counter:bne draw_glyph_column
+
+.next_char
+jsr get_next_char
+cmp #32
+bcc text_code
+jsr prepare_glyph
+lda #4:sta scroll_column_counter
+
+.draw_glyph_column
+lda glyph_dest+1:pha
+lda glyph_dest+0:pha
+jsr draw_1_glyph_column
+dec scroll_column_counter
+
+clc
+pla:adc #8:sta glyph_dest+0
+pla:adc #0:and #$1f:ora #$60:sta glyph_dest+1
+
+ldx #3
+.update_crtc_addrs_loop
+; same calculation as above, but divided by 8
+inc crtc_addrs_lo+8,x:bne got_crtc_addr
+lda crtc_addrs_hi+8,x:inc a:and #3:ora #$c:sta crtc_addrs_hi+8,x
+.got_crtc_addr
+dex
+bpl update_crtc_addrs_loop
+
+.^handle_end_frame
+rts
+
+.text_code
+tax
+jmp (text_codes_routines,x)
+
+.^handle_bad_code
+lda text_addr+0:sta $74
+lda text_addr+1:sta $75
+brk:equb 1
+
+.^handle_reset
+jsr reset_text_addr
+bra next_char
+
+.^handle_wait
+jsr get_next_char
+sta delay_counter
+; a wait always ends the frame.
+rts
+
+.^handle_set_text_colour
+jsr get_next_char
+sta text_colour
+bra next_char
+
+.^handle_set_outline_colour
+jsr get_next_char
+sta text_outline_colour
+bra next_char
+
+.^handle_one_part
+lda #lo(cheq_row)
+sta cheqRender_row13+3
+sta cheqRender_row14+3
+sta cheqRender_row15+3
+sta cheqRender_row16+3
+sta cheqRender_row17+3
+sta cheqRender_row18+3
+
+lda #hi(cheq_row)
+sta cheqRender_row13+4
+sta cheqRender_row14+4
+sta cheqRender_row15+4
+sta cheqRender_row16+4
+sta cheqRender_row17+4
+sta cheqRender_row18+4
+
+lda #7:sta row_crtc_addr_index+14:sta row_crtc_addr_index+15
+stz row_crtc_addr_index+16:stz row_crtc_addr_index+17
+stz last_scanline_dispen_table+17
+
+jmp next_char
+
+.^handle_two_parts
+lda #lo(cheq_static_middle_start_row):sta cheqRender_row13+3
+lda #hi(cheq_static_middle_start_row):sta cheqRender_row13+4
+
+lda #lo(cheq_static_middle_row)
+sta cheqRender_row14+3
+sta cheqRender_row15+3
+sta cheqRender_row16+3
+sta cheqRender_row17+3
+
+lda #hi(cheq_static_middle_row)
+sta cheqRender_row14+4
+sta cheqRender_row15+4
+sta cheqRender_row16+4
+sta cheqRender_row17+4
+
+lda #lo(cheq_static_middle_end_row):sta cheqRender_row18+3
+lda #hi(cheq_static_middle_end_row):sta cheqRender_row18+4
+
+lda #8:sta row_crtc_addr_index+14
+lda #9:sta row_crtc_addr_index+15
+lda #10:sta row_crtc_addr_index+16
+lda #11:sta row_crtc_addr_index+17
+lda #$30:sta last_scanline_dispen_table+17
+jmp next_char
+
+.^handle_scroll_dir
+jsr get_next_char:tax
+jsr get_next_char:sta cheq_dirs,x
+jmp next_char
+
+.^handle_set_colour0:jsr get_next_char:jsr cheq_set_colour0:jmp next_char
+.^handle_set_colour1:jsr get_next_char:jsr cheq_set_colour1:jmp next_char
+.^handle_set_colour2:jsr get_next_char:jsr cheq_set_colour2:jmp next_char
+.^handle_set_colour3:jsr get_next_char:jsr cheq_set_colour3:jmp next_char
+}
+
+.text_codes_routines
+equw handle_reset:text_reset=P%-2-text_codes_routines
+equw handle_wait:text_wait=P%-2-text_codes_routines
+equw handle_set_text_colour:text_set_colour=P%-2-text_codes_routines
+equw handle_set_outline_colour:text_set_outline_colour=P%-2-text_codes_routines
+; Don't process any more stuff this frame.
+equw handle_end_frame:text_end_frame=P%-2-text_codes_routines
+equw handle_one_part:text_one_part=P%-2-text_codes_routines
+equw handle_two_parts:text_two_parts=P%-2-text_codes_routines
+equw handle_scroll_dir:text_scroll_dir=P%-2-text_codes_routines
+equw handle_set_colour0:text_set_colour0=P%-2-text_codes_routines
+equw handle_set_colour1:text_set_colour1=P%-2-text_codes_routines
+equw handle_set_colour2:text_set_colour2=P%-2-text_codes_routines
+equw handle_set_colour3:text_set_colour3=P%-2-text_codes_routines
+for i,P%-text_codes_routines,63,2
+equw handle_bad_code
+next
+assert P%-text_codes_routines=64
+
+
+; ; arg = 1 byte: one of the mode2_xxx values
+; set_text_colour=1				; 1 vsync
+
+; ; arg = 1 byte: one of the mode2_xxx values
+; set_outline_colour=2			; 1 vsync
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+.get_next_char
+{
+lda (text_addr)
+inc text_addr+0
+bne done
+inc text_addr+1
+.done
+rts
+}
+
+.reset_text_addr
+{
+lda #lo(scroll_text):sta text_addr+0
+lda #hi(scroll_text):sta text_addr+1
+rts
+}
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+.update_moving_middle
+{
+
+; {
+; bit middle_static:bpl done
+; for i,0,3
+; {
+; addr=$6000+i*middle_stride
+; inc crtc_addrs_lo+8+i
+; bne got_crtc_addr
+; lda #lo(addr>>3):sta crtc_addrs_lo+8+i
+; lda #hi(addr>>3):sta crtc_addrs_hi+8+i
+; .got_crtc_addr
+; }
+; next
+; .done
+; }
+
+rts
+}
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+; sets ?glyph_masked_and_coloured and ?glyph_screen_mask (1=screen,
+; 0=glyph)
+.read_glyph_byte
+{
+lda (glyph_src),y				; outline data
+iny
+and text_outline_colour
+sta glyph_masked_and_coloured
+lda (glyph_src),y				; foreground data
+and text_colour
+ora glyph_masked_and_coloured
+sta glyph_masked_and_coloured
+rts
+}
+
+.prepare_glyph
+{
+; point (glyph_src) to char data
+;
+; 64 bytes/char.
+sec:sbc #32
+sta glyph_src+1
+lsr glyph_src+1:ror a
+lsr glyph_src+1:ror a
+clc
+and #%11000000:adc #LO(cheq_font_dest):sta glyph_src+0
+lda glyph_src+1:adc #HI(cheq_font_dest):sta glyph_src+1
+rts
+}
+
+.draw_1_glyph_column
+{
+ldy #0
+
+lda #0
+sta (glyph_dest),y:iny			; +0 0
+sta (glyph_dest),y:iny			; +1 1
+sta (glyph_dest),y:iny			; +2 2
+sta (glyph_dest),y				; +3 3
+
+ldy #0:jsr read_glyph_byte
+ldy #4
+sta (glyph_dest),y:iny			; +4 4
+sta (glyph_dest),y:iny			; +5 5
+sta (glyph_dest),y				; +6 6
+
+ldy #2:jsr read_glyph_byte
+ldy #7
+sta (glyph_dest),y:				; +7 7
+jsr next_row
+lda glyph_masked_and_coloured
+ldy #0
+sta (glyph_dest),y:iny			; +8 0
+sta (glyph_dest),y				; +9 1
+
+ldy #4:jsr read_glyph_byte
+ldy #2
+sta (glyph_dest),y:iny			; +10 2
+sta (glyph_dest),y:iny			; +11 3
+sta (glyph_dest),y				; +12 4
+
+ldy #6:jsr read_glyph_byte
+ldy #5
+sta (glyph_dest),y:iny			; +13 5
+sta (glyph_dest),y:iny			; +14 6
+sta (glyph_dest),y				; +15 7
+
+jsr next_row
+
+ldy #8:jsr read_glyph_byte
+ldy #0
+sta (glyph_dest),y:iny			; +16 0
+sta (glyph_dest),y:iny			; +17 1
+sta (glyph_dest),y				; +18 2
+
+ldy #10:jsr read_glyph_byte
+ldy #3
+sta (glyph_dest),y:iny			; +19 3
+sta (glyph_dest),y:iny			; +20 4
+sta (glyph_dest),y:				; +21 5
+
+ldy #12:jsr read_glyph_byte
+ldy #6
+sta (glyph_dest),y:iny			; +22 6
+sta (glyph_dest),y				; +23 7
+jsr next_row
+lda glyph_masked_and_coloured
+ldy #0
+sta (glyph_dest),y:iny			; +24 0
+
+ldy #14:jsr read_glyph_byte
+ldy #1
+sta (glyph_dest),y:iny			; +25 1
+sta (glyph_dest),y:iny			; +26 2
+sta (glyph_dest),y:iny			; +27 3
+
+lda #0
+sta (glyph_dest),y:iny			; +28 4
+sta (glyph_dest),y:iny			; +29 5
+sta (glyph_dest),y:iny			; +30 6
+sta (glyph_dest),y				; +31 7
+
+clc
+lda glyph_src+0:adc #16:sta glyph_src+0
+lda glyph_src+1:adc #0:sta glyph_src+1
+
+rts
+
+.next_row
+clc
+lda glyph_dest+0:adc #lo(middle_stride):sta glyph_dest+0
+lda glyph_dest+1:adc #hi(middle_stride):and #$1f:ora #$60:sta glyph_dest+1
+rts
+}
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+.*cheqPrepare
+{
+jsr ZeroEffectWorkspace
+
+
+; HERE ... set up resetCRTC 'next effect' byte to go to Outro!
+LDA #fxIndex_Outro
+STA timeline_resetCRTC_END - 1
+
+; mode 2, standard palette.
+lda #$14:sta $fe20
+clc:lda #$00:.set_palette_loop:eor #$07:sta $fe21:eor #$07:adc #$11:bcc set_palette_loop
+
+for i,0,3
+{
+addr=middle_base+i*middle_stride
+lda #lo(addr>>3):sta crtc_addrs_lo+8+i
+lda #hi(addr>>3):sta crtc_addrs_hi+8+i
+}
+next
+
+lda #lo(middle_base+middle_width*8):sta glyph_dest+0
+lda #hi(middle_base+middle_width*8):sta glyph_dest+1
+
+lda #%00000011:sta text_outline_colour
+lda #%00001111:sta text_colour
+
+jsr reset_text_addr
+
+; Set latch b5=0, b4=1 - 8K hardware scrolling
+lda #4+8:sta $fe40
+lda #5+0:sta $fe40
+
+; reset palette
+lda #PAL_black:jsr cheq_set_colour0
+lda #PAL_black:jsr cheq_set_colour1
+lda #PAL_black:jsr cheq_set_colour2
+lda #PAL_black:jsr cheq_set_colour3
+rts
+}
+rts
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+.*cheqCleanup
+{
+lda #8:sta $fe00:stz $fe01		; ensure display enabled
+}
+rts
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+.cheq_data:incbin "intermediate/cheq_full_4bpp.exo"
+
+.scroll_text
+
+equs text_set_colour1,PAL_yellow
+equs text_wait,50
+equs text_scroll_dir,0,1
+equs text_scroll_dir,1,1
+equs text_wait,50
+equs text_set_colour2,PAL_red
+equs text_wait,25
+equs text_set_colour3,PAL_blue
+equs text_wait,100
+equs text_two_parts
+equs text_wait,100
+equs text_set_colour,mode2_8
+equs text_set_outline_colour,mode2_7
+equs "     THE END     "
+equs text_wait,50
+equs text_set_outline_colour,mode2_1
+equs text_set_outline_colour,mode2_3
+equs text_scroll_dir,1,$ff
+equs "                    "		; 20x
+equs "THANKS FOR WATCHING!"
+equs "                    "		; 20x
+; equs text_scroll_dir,0,0
+; equs text_scroll_dir,1,0
+equs text_wait,255
+; equs text_set_colour,mode2_1,text_set_outline_colour,mode2_2,"C"
+; equs text_set_colour,mode2_2,text_set_outline_colour,mode2_3,"O"
+; equs text_set_colour,mode2_3,text_set_outline_colour,mode2_4,"L"
+; equs text_set_colour,mode2_4,text_set_outline_colour,mode2_5,"O"
+; equs text_set_colour,mode2_5,text_set_outline_colour,mode2_6,"U"
+; equs text_set_colour,mode2_6,text_set_outline_colour,mode2_7,"R"
+; equs text_set_colour,mode2_7,text_set_outline_colour,mode2_1,"S"
+; equs text_set_colour,mode2_1,text_set_outline_colour,mode2_2,"!"
+; equs text_scroll_dir,0,$ff
+; equs text_scroll_dir,1,1
+; equs text_wait,50
+; equs text_set_colour,mode2_8
+; equs text_scroll_dir,1,$ff
+; equs text_set_outline_colour,mode2_1
+; equs "VARIOUS OPTIONS FOR THIS                    "
+equs text_one_part
+equb text_reset
+
+; .message_addrs
+; equw message0
+; equw message1
+
+; ;               0123456789012345678
+; .message0:equs "BITSHIFTERS",0
+; .message1:equs "PRESENT",0
+; .message2:equs "SOME KIND OF DEMO",0
+
+; .message0
+; equs set_dest,1,2
+; equs set_text_colour,mode2_1,set_outline_colour,mode2_3
+; equs "THANKS "
+; equs set_text_colour,mode2_0,set_outline_colour,mode2_7
+; equs "FOR "
+; equs set_text_colour,mode2_3,set_outline_colour,mode2_1
+; equs "WATCHING"
+; equb 0
+
+; .message1
+; equs set_dest,3,0
+; equs set_outline_colour,mode2_0
+; equs set_text_colour,mode2_1,"C"
+; equs set_text_colour,mode2_2,"O"
+; equs set_text_colour,mode2_3,"L"
+; equs set_text_colour,mode2_4,"O"
+; equs set_text_colour,mode2_5,"U"
+; equs set_text_colour,mode2_6,"R"
+; equs set_text_colour,mode2_7,"S"
+; equs set_text_colour,mode2_1,"!"
+; equb 0
+
+.*cheqTimeline
+TimelineEntryHeader tc_waitType_sinceLastTimelinePoint, 1
+Timeline_BeginDecrunch cheq_data,SLOT_CHEQ ; ~120 frames
+
+TimelineEntryHeader tc_waitType_sinceLastTimelinePoint, 135
+Timeline_BeginDecrunch cheq_font_packed,SLOT_CHEQ_FONT ; ~50 frames
+
+TimelineEntryHeader tc_waitType_sinceLastTimelinePoint, 60
+Timeline_SetZPValue scrolling,1
+
+TimelineEntryHeader tc_waitType_sinceLastTimelinePoint, 700
+TimelineFunction_1Arg tl_fnIndex_swapToEffect, fxIndex_ResetCRTC
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+}

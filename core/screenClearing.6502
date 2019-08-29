@@ -1,0 +1,102 @@
+;*************************************
+; Functions for clearing the screen. All assume that the entire (20k) screen is to be cleared.
+;
+;*************************************
+
+.ClearScreenUsingMask
+LDA #&39 ; Opcode for AND Absolute,Y
+BRA SetMaskType
+
+.SetScreenUsingMask
+LDA #&19 ; Opcode for ORA Absolute,Y
+
+.SetMaskType
+STA clearWithMaskloop
+
+; Function that loops over the screen memory and either sets specified bits or clears specified bytes from a mask byte.
+; The set/clear behaviour is implemented by changing the opcode that reads the current byte value between ORA
+; and AND. (AND: Clear bytes that are zero in mask. ORA: Set bytes that are 1 in mask.)
+.clearScreenWithMask
+{
+	; Set start address
+	LDA #&30
+	STA clearWithMaskloop+2
+	STA clearWithMaskloop+5
+	STZ clearWithMaskloop+1
+	STZ clearWithMaskloop+4
+	LDA screenClearWithMaskByte + 1
+    ; Hex 50 in line below is DEC 80, which is 320/4 because there are 256 (inner loop) time 320 (outer loop)
+    ; pixels and each byte contains four pixels of data, so outer loop must loop 80 times. 
+	LDX #&50
+	LDY #00
+.^clearWithMaskloop
+	ORA screen_base_addr,Y ; This does ORA or AND depending on whether SetScreenUsingMask or ClearScreenUsingMask was calles
+	STA screen_base_addr,Y
+	.^screenClearWithMaskByte
+	LDA #&FF			   ; The mask may be changed to clear in a variety of different patterns.
+	INY
+	BNE clearWithMaskloop
+	INC clearWithMaskloop+2
+	INC clearWithMaskloop+5
+	DEX
+	BNE clearWithMaskloop
+	RTS
+}
+
+
+; A similar screen-clearing function that clears the screen simply by writing &FF to all screen bytes.
+; It also has some disabled prototype code for clearing to different patterns, which wasn't used in the final demo.
+.clearScreen
+IF clearToPattern = 0
+{
+	; Set start address to bottom of screen memory.
+	LDA #&30
+	STA clearloop+2
+	STZ clearloop+1
+	.^screenClearByte
+	LDA #&FF
+    \\ Hex 50 in line below is DEC 80, which is 320/4 because there are 256 (inner loop) time 320 (outer loop)
+    \\ pixels and each byte contains four pixels of data, so outer loop must loop 80 times. 
+	LDX #&50
+	LDY #00
+.^clearloop
+	STA screen_base_addr,Y
+	INY
+	BNE clearloop
+	INC clearloop+2
+	DEX
+	BNE clearloop
+}
+ELSE
+    \\ Hex 50 in line below is DEC 80, which is 320/4 because there are 256 (inner loop) time 320 (outer loop)
+    \\ pixels and each byte contains four pixels of data, so outer loop must loop 80 times. 
+
+	LDA #&30
+	STA store+2
+	STZ store+1
+
+	LDX #&50
+	LDY #00
+.clearloop
+	TYA
+	AND #7
+	EOR #&FF
+	STA tempVar
+	LDA #LO(screenPattern)
+	ORA #7
+	AND tempVar
+	STA patternLoad+1		\\ Self-mod to change to load from one of four addresses starting at screenPattern
+.patternLoad
+	LDA screenPattern
+
+.store
+	STA screen_base_addr,Y
+	INY
+	BNE clearloop
+	INC store+2
+	DEX
+	BNE clearloop
+
+ENDIF
+
+RTS

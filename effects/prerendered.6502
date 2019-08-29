@@ -1,0 +1,475 @@
+align 256
+include "intermediate/prerendered_tables.6502"
+{
+
+anim_addr=effectVariables+0		  ; 2
+state_index=effectVariables+2	  ; 1
+old_state_index=effectVariables+3 ; 1
+;scroll_rows=effectVariables+4	  ; 1
+unused=effectVariables+5		  ; 1
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+num_slots=16
+num_screen_rows=32
+
+; Index of anim slot to use for this screen row.
+;
+; There are more screen row slots than there are screen rows! - this
+; makes it easier to scroll.
+.screen_row_slots:skip num_screen_rows
+
+MACRO PerSlotTable
+skip num_slots
+must_be_same_page P%-num_slots
+ENDMACRO
+
+.slot_static_data
+; Start address of the anim, and number of frames in it.
+.slot_anim_starts_lo:PerSlotTable
+.slot_anim_starts_hi:PerSlotTable
+.slot_anim_frame_counts:PerSlotTable
+
+; CRTC base address. Offset from the anim is added to produce the
+; actual address to use.
+.slot_crtc_bases_lo:PerSlotTable
+.slot_crtc_bases_hi:PerSlotTable
+
+assert P%-slot_static_data<=256
+
+.slot_dynamic_data
+; CRTC address to use. Base address plus whatever from the anim.
+.slot_crtc_addrs_lo:PerSlotTable
+.slot_crtc_addrs_hi:PerSlotTable
+
+; Index of current anim frame.
+.slot_anim_frame_indexes:PerSlotTable
+.slot_anim_frame_index_fracs:PerSlotTable
+
+; Delta of frame index.
+.slot_anim_frame_index_deltas:PerSlotTable
+.slot_anim_frame_index_delta_fracs:PerSlotTable
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+null_anim_num_frames=1
+.null_anim_data
+equw 0
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+align 256
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+.row_msb_fixup_table:equb $00,$50
+
+.*prRender
+{
+jsr wait128						; +128=128
+jsr wait20						; +20=148
+jsr wait20						; +20=168
+; nop:nop							; +4=152
+; lda #8:sta $fe00				; +8=160
+; lda r8_value:sta $fe01			; +8=168
+lda #4:sta $fe00
+lda #0:sta $fe01
+lda #6:sta $fe00
+lda #255:sta $fe01				; +32=200
+
+ldx #0:jsr pr_row
+ldx #1:jsr pr_row
+ldx #2:jsr pr_row
+ldx #3:jsr pr_row
+ldx #4:jsr pr_row
+ldx #5:jsr pr_row
+ldx #6:jsr pr_row
+ldx #7:jsr pr_row
+ldx #8:jsr pr_row
+ldx #9:jsr pr_row
+ldx #10:jsr pr_row
+ldx #11:jsr pr_row
+ldx #12:jsr pr_row
+ldx #13:jsr pr_row
+ldx #14:jsr pr_row
+ldx #15:jsr pr_row
+ldx #16:jsr pr_row
+ldx #17:jsr pr_row
+ldx #18:jsr pr_row
+ldx #19:jsr pr_row
+ldx #20:jsr pr_row
+ldx #21:jsr pr_row
+ldx #22:jsr pr_row
+ldx #23:jsr pr_row
+ldx #24:jsr pr_row
+ldx #25:jsr pr_row
+ldx #26:jsr pr_row
+ldx #27:jsr pr_row
+ldx #28:jsr pr_row
+ldx #29:jsr pr_row
+ldx #30:jsr pr_row
+ldx #31:jsr pr_row
+
+; another 7 rows to complete the full set of 39, with vsync on the
+; 34th.
+lda #4:sta $fe00:lda #6:sta $fe01 ; vertical total
+lda #6:sta $fe00:lda #0:sta $fe01 ; vertical displayed
+lda #7:sta $fe00:lda #3:sta $fe01 ; vsync position
+jmp EffectRenderReturn
+
+.pr_row
+; +8=8
+
+; +1, as preparing for next row.
+
+ldy screen_row_slots+1,x		; +4=12
+
+lda #13							; +2=14
+sta $fe00						; +6=20
+
+lda slot_crtc_addrs_lo,y		; +4=24
+sta $fe01						; +6=30
+
+lda #12							; +2=32
+sta $fe00						; +6=38
+
+lda slot_crtc_addrs_hi,y		; +4=42
+sta $fe01						; +4=48
+
+jsr wait44						; +44=92
+jsr wait16						; +16=108
+jsr wait14						; +14=122
+
+jsr wait128
+jsr wait128						
+jsr wait128
+jsr wait128
+jsr wait128
+jsr wait128
+jsr wait128						; +7*128=1018
+rts								; +6=1024
+}
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+.state_routines
+state_enable_display=P%-state_routines:equw enable_display
+state_circle_dots=P%-state_routines:equw circle_dots
+; state_tiles_1px_leftwards=P%-state_routines:equw tiles_1px_leftwards
+; state_tiles_2px_leftwards=P%-state_routines:equw tiles_2px_leftwards
+; state_tiles_3px_leftwards=P%-state_routines:equw tiles_3px_leftwards
+; state_tiles_4px_leftwards=P%-state_routines:equw tiles_4px_leftwards
+; state_tiles_5px_leftwards=P%-state_routines:equw tiles_5px_leftwards
+; state_tiles_pyramid=P%-state_routines:equw tiles_pyramid
+state_tiles_sines=P%-state_routines:equw tiles_sines
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+.enable_display
+{
+lda #8:sta $fe00:stz $fe01
+jmp prUpdate_state_done
+}
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+.circle_dots
+{
+lda #lo(pr_part_dots_y0_row0_crtc_addr):sta slot_crtc_bases_lo+0
+lda #hi(pr_part_dots_y0_row0_crtc_addr):sta slot_crtc_bases_hi+0
+
+lda #lo(pr_anim_dots):sta slot_anim_starts_lo+0
+lda #hi(pr_anim_dots):sta slot_anim_starts_hi+0
+lda #pr_anim_dots_num_frames:sta slot_anim_frame_counts+0
+
+ldx #0:jsr update_slot_dynamic_data
+
+ldx #31
+.loop
+stz screen_row_slots,x
+dex:bpl loop
+
+jmp prUpdate_state_done
+}
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+.tiles_sines
+{
+lda #lo(pr_part_tiles_row0_crtc_addr)
+ldx #slot_crtc_bases_lo+0-slot_static_data
+jsr fill_alternate_slots
+
+lda #hi(pr_part_tiles_row0_crtc_addr)
+ldx #slot_crtc_bases_hi+0-slot_static_data
+jsr fill_alternate_slots
+
+lda #lo(pr_part_tiles_row1_crtc_addr)
+ldx #slot_crtc_bases_lo+1-slot_static_data
+jsr fill_alternate_slots
+
+lda #hi(pr_part_tiles_row1_crtc_addr)
+ldx #slot_crtc_bases_hi+1-slot_static_data
+jsr fill_alternate_slots
+
+for i,0,num_slots-1
+lda #lo(pr_anim_7xn_sine):sta slot_anim_starts_lo+i
+lda #hi(pr_anim_7xn_sine):sta slot_anim_starts_hi+i
+lda #pr_anim_7xn_sine_num_frames:sta slot_anim_frame_counts+i
+next
+
+ldx #num_slots-1
+.loop
+jsr update_slot_dynamic_data
+dex:bpl loop
+
+; adjust anim positions
+for i,0,num_slots-1
+t=1+((i div 2)/15.0)/8.0
+lda #int(t):sta slot_anim_frame_index_deltas+i
+lda #int((t-int(t))*256):sta slot_anim_frame_index_delta_fracs+i
+; lda #i div 2:sta slot_anim_frame_indexes+i
+; lda #lo(pr_anim_7xn_sine+(i div 2)*2):sta slot_anims_lo+i
+; lda #hi(pr_anim_7xn_sine+(i div 2)*2):sta slot_anims_hi+i
+next
+
+for i,0,31
+lda #i mod num_slots
+sta screen_row_slots+i
+next
+
+ldx #0
+lda #0
+.init_screen_row_slots_loop
+sta screen_row_slots,x
+inc a
+cmp #num_slots-1:{bcc k:lda #0:.k}
+dex:bpl init_screen_row_slots_loop
+
+jmp prUpdate_state_done
+
+.fill_alternate_slots
+{
+ldy #num_slots div 2
+.loop
+sta slot_static_data,x
+inx:inx
+dey
+bne loop
+rts
+}
+}
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+; preserves x/y
+.update_slot_dynamic_data
+{
+lda slot_crtc_bases_lo,x:sta slot_crtc_addrs_lo,x
+lda slot_crtc_bases_hi,x:sta slot_crtc_addrs_hi,x
+stz slot_anim_frame_indexes,x
+stz slot_anim_frame_index_fracs,x
+lda #1:sta slot_anim_frame_index_deltas,x
+stz slot_anim_frame_index_delta_fracs,x
+rts
+}
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+.*prUpdate
+{
+ldx state_index
+cpx old_state_index
+beq prUpdate_state_done
+
+stx old_state_index
+
+jmp (state_routines,x)
+
+.*prUpdate_state_done
+
+; bit scroll_rows
+; bmi do_scroll_rows
+;.*prUpdate_rows_scrolled
+
+ldx #num_slots-1
+ldy #1
+.update_slots_loop
+
+; form anim data address.
+lda slot_anim_frame_indexes,x
+asl a
+rol anim_addr+1
+clc
+adc slot_anim_starts_lo,x
+sta anim_addr+0
+
+lda anim_addr+1
+and #1
+adc slot_anim_starts_hi,x
+sta anim_addr+1
+
+; post-increment of frame, with wrap.
+clc
+lda slot_anim_frame_index_fracs,x
+adc slot_anim_frame_index_delta_fracs,x
+sta slot_anim_frame_index_fracs,x
+lda slot_anim_frame_indexes,x
+adc slot_anim_frame_index_deltas,x
+cmp slot_anim_frame_counts,x
+bcc got_frame_index
+; C=1
+sbc slot_anim_frame_counts,x
+.got_frame_index
+sta slot_anim_frame_indexes,x
+; and keep the fractional part.
+
+clc
+lda (anim_addr)
+adc slot_crtc_bases_lo,x
+sta slot_crtc_addrs_lo,x
+
+lda (anim_addr),y				; Y=1
+adc slot_crtc_bases_hi,x
+sta slot_crtc_addrs_hi,x
+
+.next_slot
+dex
+bpl update_slots_loop
+
+ldx screen_row_slots+0
+
+lda #13:sta $fe00
+lda slot_crtc_addrs_lo,x:sta $fe01
+
+lda #12:sta $fe00
+lda slot_crtc_addrs_hi,x:sta $fe01
+
+jmp EffectUpdateReturn
+
+; .loop_anim
+; ; reset anim address, then restart the loop. The post-increment is
+; ; still required.
+; lda slot_anim_starts_lo,x:sta slot_anims_lo,x
+; lda slot_anim_starts_hi,x:sta slot_anims_hi,x
+; bra update_slots_loop
+
+; .do_scroll_rows
+; ldx screen_row_slots+0
+; ldy screen_row_slots+1
+; FOR i,2,num_screen_rows-1,2
+; lda screen_row_slots+i+0:sta screen_row_slots+(i-2+0)
+; lda screen_row_slots+i+1:sta screen_row_slots+(i-2+1)
+; NEXT
+; stx screen_row_slots+num_screen_rows-2
+; sty screen_row_slots+num_screen_rows-1
+; jmp prUpdate_rows_scrolled
+}
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+.*prPrepare
+{
+jsr ZeroEffectWorkspace
+
+; $ff is an invalid state index.
+lda #$ff:sta state_index:sta old_state_index
+
+; mode 2 CRTC settings
+ldx #0
+.init_crtc_loop
+lda crtc_regs,x:beq done
+sta $fe00
+lda crtc_regs+1,x
+sta $fe01
+inx:inx
+bra init_crtc_loop
+.done
+
+; mode 2, standard palette
+lda #$14:sta $fe20
+clc:lda #0
+.set_palette_loop
+eor #$07:sta $fe21:eor #$07
+adc #$11:bcc set_palette_loop
+
+; fill slots table with no-anim data
+ldx #num_slots-1
+.init_slots_loop
+lda #lo(null_anim_data):sta slot_anim_starts_lo,x
+lda #hi(null_anim_data):sta slot_anim_starts_hi,x
+lda #null_anim_num_frames:sta slot_anim_frame_counts,x
+lda #lo($3000>>3):sta slot_crtc_bases_lo,x
+lda #hi($3000>>3):sta slot_crtc_bases_hi,x
+dex:bpl init_slots_loop
+
+; initialise derived slots table data
+ldx #num_slots-1
+.prepare_slots_table
+jsr update_slot_dynamic_data
+dex:bpl prepare_slots_table
+
+; ; set up row slots
+; ldx #0
+; .init_row_slots_loop
+; lda #0:sta screen_row_slots,x:inx
+; lda #0:sta screen_row_slots,x:inx
+; cpx #32:bcc init_row_slots_loop
+}
+rts
+
+.crtc_regs
+equb 1,80
+equb 4,38
+equb 6,32
+equb 9,7
+equb 12,$06
+equb 13,$00
+equb 8,$30						; disable display while everything is
+								; set up
+equb 0
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+.*prCleanup
+{
+}
+rts
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+.pr_data:incbin "intermediate/prerendered.exo"
+
+.*prTimeline
+TimelineEntryHeader tc_waitType_sinceLastTimelinePoint, 1
+Timeline_BeginDecrunch pr_data,SLOT_PR
+
+; unpack time = ~$c2 frames
+TimelineEntryHeader tc_waitType_sinceLastTimelinePoint, 256
+Timeline_SetZPValue unused,0
+
+TimelineEntryHeader tc_waitType_sinceLastTimelinePoint, 1
+Timeline_SetZPValue state_index,state_tiles_sines
+
+TimelineEntryHeader tc_waitType_sinceLastTimelinePoint, 1
+Timeline_SetZPValue state_index,state_enable_display
+
+TimelineEntryHeader tc_waitType_sinceLastTimelinePoint, 250
+Timeline_SetZPValue state_index,state_circle_dots
+
+TimelineEntryHeader tc_waitType_sinceLastTimelinePoint, 9999
+TimelineFunction_1Arg tl_fnIndex_swapToEffect, 255
+}

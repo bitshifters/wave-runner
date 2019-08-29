@@ -1,0 +1,190 @@
+Vertical Scrolltext
+
+Introduction
+
+Perhaps surprisingly, this effect is one of the more complicated ones, both in terms of code complexity in the Update and Render functions, and in terms of the pre-processing steps and tools used to generate the code and data.
+
+To understand this effect, we'll start by describing the Render function, then describe how the text movement is handled in the Update, and then finish with how the code and data is structured and created.
+
+The Render function
+
+Each frame, stable raster is used to 'draw' large characters. The characters are not stored as bitmapped images. Instead, they are drawn using a large number of specialised 'glyph line rendering' functions. Each of these uses palette register updates to flip from rendering black to rendering a colour and then back again. In essence there is a 'glyph line renderer' function for each unique horizontal line in the entire font tile set. They all take the same number of cycles (specifically, 34).
+
+A 256-entry table contains, for each scanline, an index value indicating which glypn line function to use on that scanline. (Or it may be a special index which causes a colour change).
+
+The 'starting point' in this table changes from frame to frame. Because there are 256 scanlines, and 256 entries in the table, every entry is used for every frame. (The line funtion indices are retrieved from the table using absolute indexed addressing based on the the table's starting address). However, the order in which they are rendered changes from frame to frame. This is how the scrolltext moves vertically. (See below).
+
+On each scanline:
+
+*To make the pattern move left and right*:
+
+- The tried-and-tested 16-bit-addition is used to increment a counter.
+- The high byte of this counter is used as an index into a 256-entry sine table (whose values vary between 0 and 48).
+- The retrieved value is compared to the value that was used on the previous line.
+- The difference value is used to control a Clockslide. This variable delay makes sure that the glyph line rendering starts in the right place with respect to the raster scanning.
+
+*To draw the glyph line*
+
+- The next entry is retrieved from the 256-entry table of 'line function indices'.
+- If the high bit is set, then this is a 'control code'. If so:
+  - The value (with high bit cleared) is used to look up into the table of 'control code handling functions'.
+  - The appropriate function is called (using JSR)
+- If the high bit is not set, then this is a normal glyph line:
+  - Use the value as an index into a table of addresses of functions that draw glyph lines.
+  - JMP to the function.
+
+  
+This logic continues for 256 lines.
+
+
+Starting the pattern in the right place
+
+Each line, this effect uses a clockslide to introduce a delay, whose length is based on the differnce between the previous and current lines' horizontal position (which comes from the sine table).
+
+You may therefore be wondering how the top line of the screen (which has no 'previous' line to compare to) is delayed by the correct value, based on the 'starting' sine table value.
+
+In actual fact a much longer Clockslide -- which can delay by between 0 and 48 cycles -- is used to posiion the pattern in the correct place on the first line. 
+
+
+
+The Update Function
+
+This function is responsible for:
+
+- Updating the starting position in the sine table, which changes at what point in the left/right movement the top scanline starts. (A simple 16-bit addition using the current 'left/right wibble speed' variable).
+- Scrolling the text vertically.
+- Processing scrolltext control codes.
+
+Scrolling the Scrolltext
+
+Moving the scrolltext is done using a technique akin to hardware scrolling. Each frame, depending on the scrolltext speed, the 'start' index (essentially a 'pointer' into the table of line functions to call for each scanline) is incremented (and wraps around from 255 to 0). Then the lines between the old and the new 'start' indices -- which are the ones which just scrolled off the top of the screen -- are filled in with new values. These 'new' lines are the ones which scrolled onto the bottom of the screen this frame.
+
+The function to add the new lines is one of the most complicated in the codebase. Very broadly it goes something like this:
+
+Loop over <number of lines to be updated this frame> 
+	.LoadNextByte
+  - Load next byte from the current scrolltext character stream.
+  - If it is a control code:
+    - Immediately process it (jump to appropriate control-code-processing function0.
+	- Continue (branch to LoadNextByte).
+  - Otherwise:
+    - Update the 256-entry 'line rendering functions' table at <line index to be updated>.
+Next <line index>
+
+The devil is in the details of the bolded line above! Without going into great detail, the code must keep track of:
+
+- the position in the scrolltext character stream.
+- what glyph is at that position.
+- the current line of the glyph (all glyphs are 15 lines high, but the code can handle glyphs of any height).
+- the index of the 'line drawing function' corresponding to the current glyph line.
+- how many times the line has been repeated so far (because each glyph line repeats for 4 scanlines)
+
+To do this it maintains various pointers and indices -- all of them in zero-page -- and changes them as necessary to do the following:
+
+- For each character in the scrolltext:
+  - Use the byte value as an index into the glyph tables. Look up:
+    - How many lines it contains, N. (In practise, always 15).
+	- The start address of a N-size table that contains indices of 'line drawing functions'.
+  - For each line in the glyph:
+    - Look up the index of the line drawing function for that line.
+	- For L = 1 to (number of scanlines per glyph line)
+	  - Copy the line drawing function index into the 'scanline -> line drawing function' mapping table.
+	  - Move to next scanline.
+
+
+
+
+Data and tools
+
+This effect relies on 6502 code (and a number of tables) that was generated by two C# command-line tools, created specially for the effect. As such it blurs the distinction between 'code' and 'data'.
+
+The first tool, 'FontExtractor', is responsible for splitting up font sheets into individual glyph images. The font itself is a monochrome one called 'Razor' and its glyphs are all 14x14 pixels.
+
+So the tool splits this font sheet:
+
+Into these glyphs, all 14x14 pixels:
+
+
+
+The second tool takes the individual glyph images, and does the following:
+
+* Unique line detection
+
+ Reads every line from every image, and generates a list of all unique lines. There are 107 unique lines across the entire set of glyphs. For this write-up I extended the tool to create a debug image showing all the lines:
+
+
+* Raster-code generation
+
+For every unique line, the tool creates 6502 assembly that will 'draw' the line by writing to the ULA palette register as the raster beam scans across the screen. The code assumes that register A contains the 'foreground' colour palette value and X contains the 'background' (black) colour palette value. Each source pixel take two cycles. But stores to the ULA palette register take 4 cycles, so the tool needs to deal with the fact that once it has changed colour, it cannot do so again for 2 pixels!
+
+It then generates code like this:
+
+[code]
+.line0
+NOP:NOP:NOP:NOP:NOP:NOP:NOP:NOP:NOP:NOP:NOP:NOP:NOP:NOP:NOP:NOP:NOP:
+JMP lineReturn
+.line1
+NOP:NOP:NOP:NOP:NOP:NOP:NOP:NOP:NOP:NOP:NOP:NOP:STA &FE21:STX &FE21:NOP:
+JMP lineReturn
+.line2
+NOP:NOP:NOP:NOP:NOP:NOP:NOP:NOP:NOP:NOP:NOP:STA &FE21:STX &FE21:NOP:NOP:
+JMP lineReturn
+.line3
+NOP:NOP:NOP:NOP:NOP:NOP:NOP:NOP:NOP:NOP:STA &FE21:NOP:NOP:STX &FE21:NOP:
+JMP lineReturn
+
+(and so on to line 106, ie 107 lines in total!)
+
+[/code]
+
+The tool can only emit three instructions: "NOP", "STA &FE21" and "STX &FE21". As it works its way along the pixels in each line, it keeps track of the current colour, the desired colour, and the number of cycles left since the last instruction was emitted. As soon as the 'current instruction cycle count' reaches zero, it emits another instruction: Either a NOP (if the current and desired colours are identical) or a STA/STX to change the colour.
+
+Every line takes 34 cycles to execute. This provides enough time to make a colour change on any of the last few pixels, wait (4 cycles) for the STA/STX to complete, and then do a final "STX &FE21" to ensure that all lines end on the background/black colour.
+
+* Glyph table generation
+
+For each glyph, the tool emits a table the says which unique line index to use to draw each line in the glyph.
+
+For instance, the 'A' glyph has the following table:
+
+[code]
+.glyph_A
+EQUB 15 \\ Line count
+EQUB 32:EQUB 43:EQUB 77:EQUB 94:EQUB 94:EQUB 94:EQUB 49:EQUB 49:EQUB 85:EQUB 85:EQUB 85:EQUB 85:EQUB 85:EQUB 85:EQUB 0
+[/code]
+
+Note that the first line index is '32'. If we look at line 32 we see this:
+
+[code]
+.line32
+NOP:NOP:NOP:STA &FE21:NOP:NOP:NOP:NOP:NOP:NOP:STX &FE21:NOP:NOP:NOP:NOP:
+JMP lineReturn
+[/code]
+
+This is delaying for 6 cycles, then switching to the foreground colour, then delaying for 16 cycles, switching back to background (black) and then waiting another 12. This has the effect of drawing the top line of the A: one line towards the middle of the glyph area.
+
+The final line (ignoring the last 'empty' line, which all glyphs end with to provide a break between glyphs) is '85'. Line 85 looks like this:
+
+[code]
+.line85
+STA &FE21:NOP:NOP:NOP:NOP:STX &FE21:NOP:NOP:STA &FE21:NOP:NOP:STX &FE21:NOP:
+JMP lineReturn
+[/code]
+
+This is flipping between black and foreground twice, to draw the two vertical bars at the bottom of the capital 'A'.
+
+
+
+* Glyph table address generation 
+
+Code is emitted that provides the mapping from the scrolltext characters (ie the actual scrolltext strings, stored as EQUS directives directly in the source) to the addresses of their glyph table.
+
+* Glyph line address generation
+
+Similarly, code is emitted that defines a table that maps from unique line indices to the address of the appropriate 'line rendering' function.
+
+
+
+(I've skimmed over the additional complexities that deal with adding the 'control codes' to the tables described above! Suffice to say that the files generated by the tool are 'include-d' in a special order with some additional hard-coded lines in between that 'mix in' the control-code data and functions.)
+
+

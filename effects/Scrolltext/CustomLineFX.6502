@@ -1,0 +1,146 @@
+ALIGN &100
+
+include "intermediate/font/razor14x14/code/LineAddressesHigh.6502"
+
+; Add line high addresses here
+EQUB HI(colChangeRed)
+EQUB HI(colChangeGreen)
+EQUB HI(colChangeBlue)
+EQUB HI(colChangeCyan)
+EQUB HI(colChangeMagenta)
+EQUB HI(colChangeYellow)
+EQUB HI(colChangeWhite)
+
+include "intermediate/font/razor14x14/code/LineAddressesLow.6502"
+
+; Add line low addresses here
+EQUB LO(colChangeRed)
+EQUB LO(colChangeGreen)
+EQUB LO(colChangeBlue)
+EQUB LO(colChangeCyan)
+EQUB LO(colChangeMagenta)
+EQUB LO(colChangeYellow)
+EQUB LO(colChangeWhite)
+
+include "intermediate/font/razor14x14/code/GlyphAddressesHigh.6502"
+
+; Add custom glyph addresses high here
+EQUB HI(glyph_Red)
+EQUB HI(glyph_Green)
+EQUB HI(glyph_Blue)
+EQUB HI(glyph_Cyan)
+EQUB HI(glyph_Magenta)
+EQUB HI(glyph_Yellow)
+EQUB HI(glyph_White)
+
+include "intermediate/font/razor14x14/code/GlyphAddressesLow.6502"
+
+; Add custom glyph addresses low here
+EQUB LO(glyph_Red)
+EQUB LO(glyph_Green)
+EQUB LO(glyph_Blue)
+EQUB LO(glyph_Cyan)
+EQUB LO(glyph_Magenta)
+EQUB LO(glyph_Yellow)
+EQUB LO(glyph_White)
+
+include "intermediate/font/razor14x14/code/Glyphs.6502"
+
+; Add the custom glyphs themselves here
+.glyph_Red
+EQUB 1 ; Line count
+EQUB processedLineCount
+
+.glyph_Green
+EQUB 1 ; Line count
+EQUB processedLineCount+1
+
+.glyph_Blue
+EQUB 1 ; Line count
+EQUB processedLineCount+2
+
+.glyph_Cyan
+EQUB 1 ; Line count
+EQUB processedLineCount+3
+
+.glyph_Magenta
+EQUB 1 ; Line count
+EQUB processedLineCount+4
+
+.glyph_Yellow
+EQUB 1 ; Line count
+EQUB processedLineCount+5
+
+.glyph_White
+EQUB 1 ; Line count
+EQUB processedLineCount+6
+
+include "intermediate/font/razor14x14/code/GlyphLines.6502"
+
+; Add the lines used by the custom glyphs here
+.colChangeRed
+LDA #mainColToRed \\2
+JSR LineFX_SetFGColour \\ 6
+JMP lineReturn
+
+.colChangeGreen
+LDA #mainColToGreen \\2
+JSR LineFX_SetFGColour
+JMP lineReturn
+
+.colChangeBlue
+LDA #mainColToBlue \\2
+JSR LineFX_SetFGColour
+JMP lineReturn
+
+.colChangeMagenta
+LDA #mainColToMagenta \\2
+JSR LineFX_SetFGColour
+JMP lineReturn
+
+.colChangeCyan
+LDA #mainColToCyan \\2
+JSR LineFX_SetFGColour
+JMP lineReturn
+
+.colChangeYellow
+LDA #mainColToYellow \\2
+JSR LineFX_SetFGColour
+JMP lineReturn
+
+.colChangeWhite
+LDA #mainColToWhite \\2
+JSR LineFX_SetFGColour
+JMP lineReturn
+
+\\ Function to change the background colour and, if this is the 'top' line, record the 'start' colour so the 'topmost' colour
+\\ can be re-applied at the beginning of FX render (or at end of FX update)
+\\ Inputs:
+\\ A: Palette register value. Should contain a "Set foreground colour to (col)" value.
+\\ Timing:
+\\ Must take exactly 34-8 = 26 cycles, including the 6 for the RTS
+.LineFX_SetFGColour
+
+STA textColour \\ 3
+
+\\ If Y is equal to HI(LineFunctionsStartIndex) then we are on the FIRST line of the effect render.
+\\ In that case, record what the 'first' colour should be for future frames.
+\\ TODO: Pretty certain there is a more space/time-efficient way of handling the branching/cycle-counting.
+\\ TODO2: There is a bug here. The 'colour change' line might move off the top of the screen without ever being
+\\ run while it was on the TOP line. This is only a problem when the scrolltext is moving fast, but nevertheless
+\\ we need a better approach which checks at linebuffer update time (ie when we're filling in the top N screenlines with
+\\ new glyphLines) whether any of the lines were 'special' ones that needed to record the colour (or other state)...
+\\ In fact we could split the processing for 'what to do when rendering' off from the processing for 'what to do when a line
+\\ enters or leaves the screen'.
+CPY lineFunctionsStartIndexHigh \\ 3
+BNE doNotRecordColour \\ Top-line: 2 (not taken). Not-top: 3 (taken)
+.recordColour
+STA startColour \\ 3
+NOP:NOP:NOP
+JMP done \\ 3
+.doNotRecordColour
+NOP:NOP:NOP:NOP
+JMP done \\ 3
+.done
+RTS \\ 6
+

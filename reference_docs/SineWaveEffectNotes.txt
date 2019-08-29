@@ -1,0 +1,29 @@
+Zero-page vars to read:
+
+- Start index. (Changed in post-update)
+- Increment speed. (Ditto)
+
+Later need to:
+
+- Vary increment speed per-line, based on some other calc... (Maybe no time?)
+- Vary start index change speed non-linearly.
+
+- Change them all to 16-bit values, use most-significant byte when needed.
+
+
+We need the "Render" function to start one raster line BEFORE the first VISIBLE line so we can delay an appropriate amount to ensure the first line
+starts at the right place. This delay may be MUCH LONGER than subsequent delays, hence possibly need something other than a clockslide.
+
+ 
+
+
+Load CURRENT value.
+Get diff to PREVIOUS value.
+Add constant to make it >= 0
+save current to previous
+
+slide
+
+
+LDA sinValue
+sbc prevValue

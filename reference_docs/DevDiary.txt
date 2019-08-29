@@ -1,0 +1,171 @@
+2018/11/26
+
+- Finally got scrolltext working.
+- Fixed several bugs in the code that deals with upating the screen-line-to-glyph-line mapping each frame. E.g. was skipping to next character each line instead of only when the correct number of lines had been reached!
+- Really need to prevent crashes when scrolltext starts going backwards. Do we actually want to be able to scroll it backwards?
+- The thing that's been niggling at me for ages -- why can I update the screen at 80-column precision when cycle-stretched writes only give you 40-column precision -- is finally answered!
+
+- 128 cycles (64us) per line. Of which 80 are visible (in standard modes, anyway!)
+- So if you have 80 cycles per visible line, if writes to palette register were cycle-stretched, you would expect that there was a 40-column grid across the screen and palette transitions could only happen on the grid boundaries.
+- But actually, you can perform palette swaps at 80-column boundaries. (Although when you swap you can't swap again for 4 cycles, because a write to palette register takes 4 cycles).
+- The reason is that writes to the Video ULA are NOT cycle-stretched! Looked up "Cycle stretching" and found a web page that describes which bits of hardware are, and aren't, cycle-stretched. Writing to the 6845 CRTC *is* cycle-stretched, but writes to the Video Processor aren't. (Which is lucky because if it was we wouldn't really have enough resolution to get nice-looking effects.)
+
+- Current font is 14x14, which is easy to process -- you just need a series of NOP, WriteCol1, WriteCol2 -- but would like to find a 28xN font and enhance RasterGen to deal with one-cycle precision. (Using CMP, NOP, etc).
+- Thinking about doing 'work' during what would otherwise be 'NOPS' while raster is scanning... Also, blank lines are great for additional procesing!
+
+*** If you look at the "Thin Sine" function -- the one that does some 16-bit adds to derive a number, then uses that plus (max - number) with two clockslides ... then obvious thing to try is to just have N functions that you branch to, one for each possible value... Which could each 'do work' on either side of the palette change... E.g. plot to the screen or change which colour is going to be written next...
+
+*** More generally, any effect which 'does something' at a changing time during the raster is amenable to this technique...?
+
+
+2018/11/27
+
+- Hacked in some code that changes the 'foreground' and 'background' colour during some of the line-render functions.
+- Has the effect of changing all subsequent lines that frame, and for all subsequent frames, unless another line-render changes it back.
+- Could possibly have some glyphs changing as they moved up screen if they had enough NOPS to fit in the code to calc their colour.
+
+2018/11/28
+
+- Refactored Scrolltext into separate file. Very satisfying that it worked almost immediately after all the changes.
+- Added 'control code' glyphs / lines that can be used to essentially do anything, but currently just change colour.
+- Lots of ideas for how to use control codes:
+
+  - Animated glyphs.
+  - Change speed/wibble/etc.
+  - Offset the pattern.
+  - Change screen start address, control vertical rupture, BG pattern etc.
+
+Next up: Would like to get a higher-res (32x32?) font in.
+
+So, so tired...!
+
+
+2018/11/129
+
+- There's a problem with the colour-change codes. If a colour-change line isn't executed on the top raster-line, then it won't record the new 'start' colour. Various ways to fix.
+- Experimented with changing the 'screen lines per character line' dynamically at runtime to give  glyphs that change their 'stretchiness' as they enter the screen. Problem is that it doesn't look great. They don't 'wibble' vertically after they've entered the screen. It might be interesting to see whether you could do vertical wibbling by changing a subset of the 'linefunctions' table each frame. Not just the lines that entered the screen this frame, but other ones throughout the table.
+
+*** you could even have two scrolltexts interacting by doing even/odd lines...?
+   - Edit a few days later: Not easily, because you need to account for the fact that the horizontal sine wibbling is implemented using clockslide to offset left/right.
+
+HOWEVER... before I do that, really need to improve how the glyphs are extracted and the intermediate files are built so BeebAsm picks everything up from an intermediate folder.
+This would let us play around with different fonts much more easily. Possibly do stuff like having multiple zoomed versions of a font.
+
+2018/12/04
+
+- Been v. busy but have done most of the refactoring to store intermediate font images / code in their own intermediate folder.
+- Time to regroup and plan what to do next.
+
+So, things that would move this towards an actually cool effect:
+- Proper wibbling as you move up the screen. Ie retrospectively changing the lineFunctions array.
+- Control codes for changing speed and wibble factors. So you can control them from the scrolltext, not just by hacking code.
+- Background, ie actually write to the screen memory. (Plus vrup!)
+
+NEXT:
+
+- Create framework which allows for characters that consume an additional 'payload' byte (or bytes).
+- Implement 'speed' and 'wibble factor' bytes.
+- Implement 'wait until' bytes?
+
+2018/12/10
+
+- Wow, a whole week goes by just like that!
+- Done the speed, x-wibble-speed and y-scale 'special codes'.
+- Refactored the effect so that all the variable names are unique to the effect, not just sharing names with the others. Need to do that for all the other effects!
+- Implemented an 'effect entry' and 'effect cleanup' system for transitioning between effects. Ensures you can start effect in known state.
+- The control codes are OK, but really need a way to say "over this time period, transition this variable to this value". Will work on that next.
+
+2018/12/11
+
+- Shared with Bitshifters. People seem to like it!
+- Kieran's horizontal wibbling repeated scrolltex used the "Knight" font -- blue and cyan. Would it be possible to upgrade the tools to extract coloured glyphs?
+- Already reached 255 characters. Need to implement "swap to scrolltext bank N" control code. All places that access the scrolltext will need to be upgraded to load characters from currently selected bank.
+- Look into feasibility of using multiple fonts by having control codes that swap between different lineFunction banks?
+- Note that to do this we need to change to storing line-function addresses per screen-line, instead of line-function indices. (Or, actually, you could just have a "change font bank" function that patched up the places that referred to the starting address of the line functions address table.)
+
+2018/12/17
+
+- Implemented scrolltext bank switching. My first use of LDA (address),Y ie indirect indexed addressing. Had to change several functions from assuming Y was loop counter to using X instead.
+
+NEXT UP:
+
+- Implement "lerp from one value to next over specified number of frames", so can interpolate the various wibble factors.
+- Then move onto actually changing screen contents...
+  - Ideas and notes on what you do with changing screen:
+  - Several screen banks containing different patterns. Line functions that change pattern using VRUP, so all letters afterwards use that pattern.'use esdfsdfd
+    - Would need one function to change the pattern and another to 'use existing but reset CRTC registers to support VRUP.
+    - Need to change the 'blank line' fn to jump to vrup handling... or indeed all sequences that have more than N cycles as NOPS could do vrup handling instead...
+    - So would need to work out how many cycles the 'reset registers' code takes.
+  - Update fn that changes screen over several frames from one pattern to the next.
+  - Scroll pattern smoothly vertically using CRTC.
+  - Scroll pattern smoothly horizontally using CRTC.
+
+SO:
+
+1. 16-bit LERP from one value to another.
+2. Code to change screen between a few different patterns over several frames. Big patterns, ie ones that span several bytes (16 or 32 pixels) horizontally, similar size vertically!
+3. Be able to load patterns from preprocessed chunks of memory, ie images from disc...
+
+2019/01/04
+
+Not much coding over the Xmas break.
+Have spent weeks on a 'task' system where you can create little functions that are given a few bytes of data (e.g. a target address
+and a 16-bit value to incrememnt it by each frame) and these fns are then called for a specified number of frames (until their loop counter hits zero). Also a system for specifying task data in the scrolltext bytestream.
+Taking ages but almost have it finished.
+
+Need to think about how to have a general purpose "Read bytes from a stream, interpret them to spawn tasks, do other stuff etc" system that can inter-operate smoothly each Effect. (E.g. would you want one system for handling the scrolltext, another for handling more general purpose stuff?)
+
+2019/01/20
+
+Task system taking a while. It works, but it's a bit clunky.
+Also, currently you can only spawn tasks from the scrolltext byte interpreter, but really we need a separate one for the demo as a whole.
+This is going to be a big chunk of 'boring, just need to get it done' work. But I really want to have a 'scriptable' demo system, so should probably just crack on with it.
+
+Did, however, spend an aeroplane flight (business trip) implementing a "swap a target address between two values" task, and use that to try out a scrolltext that flips between two different colours on each frame.
+
+Unfortunately, although it looked OK in an emulator, on an actual CUB (tested at ABUG) it looks incredibly flickery. It's just not suitable for CRTs, UNLESS you choose colours that are pretty similar e.g. white and yellow, or yellow and green.
+
+Might want to look into which colour combinations 'work' and build an effect around that. But feeling a bit sad that it doesn't work for all combos.
+
+TODO next:
+
+- Do a 'demo bytecode interpreter' that runs from demo start, kicks off effects, etc.
+- Each effect has its own stream of bytes.
+- Each effect can register its own bank of special tasks just for itself, and can use 'generic' tasks. (Or maybe just have 256 different types and maintain list manually?)
+- We want to be able to:
+  - Start a task at a specified time / frame.
+  - Have a task wait for another task to complete.
+  - Ie a byte sequence that says "wait until time X, then do this..."
+  - And another that says "wait for 5 seconds, then do this..."
+  - And another that says "wait until specific function returns true / false / value"... So we can e.g write a function that is "check if scrolltext is at char N of bank N".
+  - This could have N args, passed on stack...?
+
+
+2019/02/13
+
+(Remember to buy a Valentine's card today! Retro computing is great but important to think about family as well...)
+
+Not had as much time to work on this as I'd like but made some progress:
+
+- Now have a 'timeline' system. Similar to scrolltext bytecode interpreter, the timeline system reads bytes,
+interprets as "what do I wait for, and what do I do once it's happened" and acts appropriately.
+- Can currently wait for time since demo start, time since last effect change, time since last timeline point.
+- Want to do some kind of "Wait for specified task to complete" wait type but will defer that until later.
+
+Now need to do several things:
+
+- Implement per-effect timeline, by having the 'change to effect' code alter the timeline bank address (and reset timeline
+ptr to 0).
+- Prove that you can transition from one effect to the other smoothly, ie that you can have an effect finish with a particular
+pattern on screen, and another effect start running using that exact same pattern but then do something totally different.
+- Prove using the task system to 'drive' effects, e.g. have the vertical double-sine-wave move through a few different
+patterns, all driven by the task system changing memory locations.
+
+
+2019/02/15
+
+Implemented a flag which is set to 1 during frame update/render, and to 0 otherwise. Checked right at the start of the main
+frame interrupt. It shows that there are around 47 raster-lines worth of time free (48 triggered the BRK) which is great news because
+it means that even when I put in music processing etc. there should be enough spare cycles to do effect processing and
+decompression, etc.
+

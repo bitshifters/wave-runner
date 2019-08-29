@@ -1,0 +1,427 @@
+; The 'timeline' system makes stuff happen in a timed sequence.
+; Each effect has a timeline (a sequence of bytes in memory) associated with it. Each frame, the timeline system
+; reads a few bytes out of the byte stream. These bytes are a 'timeline header'. The header is decoded to determine
+; what 'type' of timeline point is next, and the counter value for the point is read. (The counter values are frames
+; ie a value of 50 means one second).
+
+; Timeline points can be:
+; - "Wait until time since demo start reaches counter value"
+; - "Wait until time since effect start reaches counter value"
+; - "Wait until time since last timeline point reaches counter value"
+; - "Wait until there is not background EXO decrunching happening"
+; - (Other types could be added later!)
+
+; On the frame that the specified counter (time since demo start, time since effect start, etc) reaches the specified
+; value, subsequent bytes are read to determine how to process this point. Currently there are three possibilities:
+
+; - Swap to a specified effect.
+; - Set the timeline start address (to the address of a chunk of memory containing a timeline stream). This allows for timelines
+;   that span more than 256 bytes, which is very common because the stream format is very inefficient.
+; - Spawn a new task.
+
+; For each of the three possibilites, different code is then executed to do the necessary work, ie the 'swap to effect' code
+; is called, or the 'spawn a task' code is called.
+
+; At the end of the 'tick timeline' function, the memory stream read pointer is left pointing to the start of the header
+; for the next timeline point.
+
+; BUGS / STUFF TO DO:
+; - Only one timeline point can be processed per frame.
+; - This means that you cannot start a number of tasks all on the same frame, etc.
+; - If you specify a timeline point in the past (ie the specified counter is already higher than the sought counter value)
+;   then the timeline never processes that point and essentially gets 'stuck'. This should be fixed so points in the past
+;   just get processed immediately.
+
+
+.SetupTimelineCounterAddresses
+    LDA #frameCountHigh
+    STA waitableCounterAddresses + tc_waitType_sinceDemoStart
+    LDA #timeSinceEffectStart
+    STA waitableCounterAddresses + tc_waitType_sinceEffectStart
+    LDA #timeSinceLastChange
+    STA waitableCounterAddresses + tc_waitType_sinceLastTimelinePoint
+    RTS
+.SetupTimelineCounterAddressesEnd
+
+
+.SetValuesRange
+; NOT IMPLEMENTED YET.
+
+.DoNothing
+INY
+STY memoryReaderOffset
+RTS
+
+.SetZeroPageValue8bit
+INY
+LDA (memoryReaderBasePtrAddress),Y
+TAX
+INY
+LDA (memoryReaderBasePtrAddress),Y
+STA 0,X
+INY
+STY memoryReaderOffset
+RTS
+
+.SetZeroPageValue16bit
+INY
+LDA (memoryReaderBasePtrAddress),Y
+TAX
+INY
+LDA (memoryReaderBasePtrAddress),Y
+STA 0,X
+INY
+LDA (memoryReaderBasePtrAddress),Y
+STA 1,X
+INY
+STY memoryReaderOffset
+RTS
+
+.SetValue8bit
+{
+INY
+LDA (memoryReaderBasePtrAddress),Y
+STA writeValue + 1
+INY
+LDA (memoryReaderBasePtrAddress),Y
+STA writeValue + 2
+INY
+LDA (memoryReaderBasePtrAddress),Y
+.writeValue
+STA &FFFF
+INY
+STY memoryReaderOffset
+RTS
+}
+
+.SetValue16bit
+{
+INY
+LDA (memoryReaderBasePtrAddress),Y
+STA tempVarZP
+INY
+LDA (memoryReaderBasePtrAddress),Y
+STA tempVarZP2
+INY
+LDA (memoryReaderBasePtrAddress),Y
+STA (tempVarZP)
+INY
+LDA (memoryReaderBasePtrAddress),Y
+PHY
+LDY #1
+STA (tempVarZP),Y
+PLY
+INY
+STY memoryReaderOffset
+RTS
+}
+
+
+.SetZPFlag
+{
+ldy memoryReaderOffset:iny
+lda (memoryReaderBasePtrAddress),y:iny
+tax
+lda (memoryReaderBasePtrAddress),y:iny
+ora 0,x
+sta 0,x
+sty memoryReaderOffset
+rts
+}
+
+.TL_SetPaletteMode1
+{
+INY
+LDA (memoryReaderBasePtrAddress),Y
+STA tempVarZP
+INY
+LDA (memoryReaderBasePtrAddress),Y
+PHY
+TAY
+LDA tempVarZP
+JSR SetPalette_Mode1
+PLY
+INY
+STY memoryReaderOffset
+RTS
+}
+
+.TL_SetPaletteMode2
+{
+INY
+LDA (memoryReaderBasePtrAddress),Y
+STA tempVarZP
+INY
+LDA (memoryReaderBasePtrAddress),Y
+PHY
+TAY
+LDA tempVarZP
+JSR SetPalette
+PLY
+INY
+STY memoryReaderOffset
+RTS
+}
+
+
+
+; This is the function that is called when the 'Swap to Effect' timeline point is encountered. Unsurprisingly, it jumps to
+; a specified effect.
+.SwapToEffect
+    ; Load byte that specifies which effect to jump to (255, or actually any value with
+    ; -ve bit (7) set) means 'next one in sequence'
+    INY
+    LDA (memoryReaderBasePtrAddress),Y
+    ; TODO: Could upgrade this so you can specify a custom timeline bank or offset when jumping into an effect...?
+    BMI nextEffect
+    JMP moveToEffect
+    .nextEffect
+    JMP moveToNextEffect
+.SwapToEffectEnd
+
+; Sets timelineBank to address of new timeline bank, and resets the timeline position (ie the
+; offset into the bank) to zero.
+.SetTimelineBank
+    INY
+    LDA (memoryReaderBasePtrAddress),Y
+    TAX
+    INY
+    LDA (memoryReaderBasePtrAddress),Y
+    STA memoryReaderBasePtrAddress
+    STX memoryReaderBasePtrAddress + 1
+    LDY #0
+    STY memoryReaderOffset
+    RTS
+.SetTimelineBankEnd
+
+.TickTimeline
+{
+    ; Timeline is a series of data blocks of the form:
+    ; 0: Flags. Trigger type (wait until frame, wait for specified time, wait for task completion)
+    ; Could possibly combine flags with Counter MSB: 14 bit counter gives 5.4 minutes of timeline,
+    ; Then the four possibilities might be: Wait for frametime, wait for time since effect start,
+    ; wait for time since last change (ie duration), and ??? maybe "wait for task with
+    ; specified ID to finish" (but would need to give tasks ids!)
+    ; 1: Counter LSB
+    ; 2: Counter MSB
+    ; 3: What to do.
+    ; 4+: ... timeline point data... (varies depending on what type of timeline point it is)
+
+    ; Read which counter is being waited for (time since demo start, time since effect start, etc)
+    LDY memoryReaderOffset
+    LDA (memoryReaderBasePtrAddress),Y
+
+    ; First we check the control code type. '3' means 'Wait for background decrunch to complete'
+    ; Which we handle in a special way. Otherwise, if its 0, 1 or 2, we simply
+    ; patch up the code which determines which ZP address (assumed to contain
+    ; a counter in form: high byte, low byte (ie high byte is in 'lowest' address))
+    ; to compare with.
+    CMP #tc_waitType_immediate
+    BEQ willProcessEntry
+    CMP #tc_waitType_decrunchDone        ; If control code is tc_waitType_decrunchDone, need to handle it specially
+    BEQ waitForDecrunchFinished
+    ; Otherwise assume it was 0, 1 or 2.
+    ; Where 0: Wait for frame count. 1: Wait for time since effect start. 2: Wait for time since last change.
+    ; (Note that this ordering is defined by the fn 'SetupTimelineCounterAddresses' above)
+    .waitForCounter
+    TAX
+    ; Wait for counter. Either kick off next task, or go straight to done.
+    LDA waitableCounterAddresses,X
+    TAX
+    INY
+    LDA (memoryReaderBasePtrAddress),Y     ; Load HIGH byte of frame count value we're waiting for
+    CMP 0,X                         ; Compare with high byte of selected counter
+    BNE done
+    INY
+    LDA (memoryReaderBasePtrAddress),Y     ; Load LOW byte of frame count value we're waiting for
+    CMP 1,X                         ; Compare with low byte of selected counter
+    BNE done
+    .willProcessEntry
+    INY
+    ; Call function that actually kicks off the next timeline transition
+    JSR ProcessTimelineEntry
+    BRA done
+
+    .waitForDecrunchFinished
+    LDA EXO_TGT_is_decrunching
+    BNE done
+    LDA EXO_TGT_request_pending
+    BNE done
+    BRA willProcessEntry
+    .done
+
+    ; Copy current bank address and offset from memory stream reader back to timeline-specific storage
+    StoreMemoryStreamReaderState timelineBankAddress, timelinePos
+
+    RTS
+}
+.TickTimelineEnd
+
+; Load bytes from the timeline stream, interpret them to work out what to do,
+; and jump to appropriate fn e.g. spawn task, swap to effect, etc.
+; MUST update timeline bank and current timeline offset so that the next time through
+; the frame loop they point to the start of the next timeline point
+.ProcessTimelineEntry
+{
+    ; Reset the "Time since timeline point change" counter to zero
+    STZ timeSinceLastChange
+    STZ timeSinceLastChange + 1
+
+    ; Load byte which indicates which function to call to process
+    ; the timeline entry. Then call that function.
+    LDA (memoryReaderBasePtrAddress),Y
+    TAX
+    LDA timelineFunctionsLow,X
+    STA jumpToFn + 1
+    LDA timelineFunctionsHigh,X
+    STA jumpToFn + 2
+    ; TODO: If all timeline entry processing functions can assume that the memory reader offset is already
+    ; in Y, then no need to store it here.
+    STY memoryReaderOffset
+.jumpToFn
+    JMP &FFFF
+}
+.ProcessTimelineEntryEnd
+
+
+
+MACRO TimelineEntryHeader waitType, counterValue 
+ASSERT waitType < waitableCountersWithArgumentTypeCount
+EQUB waitType
+EQUB HI(counterValue)
+EQUB LO(counterValue)
+ENDMACRO
+
+MACRO TimelineEntryHeaderForFlag waitType 
+ASSERT waitType >= waitableCountersWithArgumentTypeCount
+EQUB waitType
+ENDMACRO
+
+MACRO TimelineFunction_0Arg functionIndex
+EQUB functionIndex
+ENDMACRO
+
+MACRO TimelineFunction_1Arg functionIndex, arg0
+EQUB functionIndex
+EQUB arg0
+ENDMACRO
+
+MACRO TimelineFunction_2Arg functionIndex, arg0, arg1
+EQUB functionIndex
+EQUB arg0
+EQUB arg1
+ENDMACRO
+
+MACRO TimelineFunction_5Arg functionIndex, arg0, arg1, arg2, arg3, arg4
+EQUB functionIndex
+EQUB arg0
+EQUB arg1
+EQUB arg2
+EQUB arg3
+EQUB arg4
+ENDMACRO
+
+MACRO TimelineFunction_3Arg functionIndex, arg0, arg1, arg2
+EQUB functionIndex
+EQUB arg0
+EQUB arg1
+EQUB arg2
+ENDMACRO
+
+MACRO TimelineFunction_4Arg functionIndex, arg0, arg1, arg2, arg3
+EQUB functionIndex
+EQUB arg0
+EQUB arg1
+EQUB arg2
+EQUB arg3
+ENDMACRO
+
+decrunchFlags_ToShadowMemory = %00010000
+decrunchFlags_ToMainMemory = %00000000
+
+MACRO Timeline_BeginDecrunch decrunchAddress, swrBankAndShadowState
+TimelineFunction_3Arg tl_fnIndex_startDecrunch, HI(decrunchAddress), LO(decrunchAddress), swrBankAndShadowState
+ENDMACRO
+
+MACRO Timeline_SetZPFlag addr,mask
+TimelineFunction_2Arg tl_fnIndex_setZPFlag,addr,mask
+ENDMACRO
+
+MACRO Timeline_SetZPValue addr,value
+TimelineFunction_2Arg tl_fnIndex_setZeroPageToValue_8bit,addr,value
+ENDMACRO
+
+MACRO Timeline_SetZPValue_16bit addr,value
+TimelineFunction_3Arg tl_fnIndex_setZeroPageToValue_16bit,addr,LO(value),HI(value)
+ENDMACRO
+
+MACRO Timeline_BeginTask taskFnAddress, LoopStartValue, byteCount
+TimelineFunction_5Arg tl_fnIndex_spawnTask, HI(taskFnAddress), LO(taskFnAddress), HI(LoopStartValue), LO(LoopStartValue), byteCount
+ENDMACRO
+
+MACRO Timeline_SetAddressToValue_8bit addr,value
+TimelineFunction_3Arg tl_fnIndex_setAddressToValue_8bit,LO(addr),HI(addr),value
+ENDMACRO
+
+MACRO Timeline_SetAddressToValue_16bit addr,value
+TimelineFunction_4Arg tl_fnIndex_setAddressToValue_16bit,HI(addr),LO(addr),HI(value),LO(value)
+ENDMACRO
+
+MACRO Timeline_BeginTaskAddValueThenSetFinal targetAddressOnZP, framesToRun, valueToAdd, finalValue
+{
+	Timeline_BeginTask AddConstantThenSetFinal_16, framesToRun, (argsEnd - argsBegin)     ; Begin a task whose fn is AddConstant_16, start task loop counter at LoopStartValue, and this task fn needs three bytes copied to the task block
+	.argsBegin
+	EQUB targetAddressOnZP
+	EQUB LO(valueToAdd)
+	EQUB HI(valueToAdd)
+    EQUB LO(finalValue)
+	EQUB HI(finalValue)
+	.argsEnd
+}
+ENDMACRO
+
+
+MACRO Timeline_BeginTaskCopyData srcAddress, dstAddress, startIndex, increment, framesToRun
+{
+    Timeline_BeginTask CopyData, framesToRun, (argsEnd - argsBegin)
+    .argsBegin
+    EQUB HI(srcAddress)
+    EQUB LO(srcAddress)
+    EQUB HI(dstAddress)
+    EQUB LO(dstAddress)
+    EQUB startIndex
+    EQUB increment
+    .argsEnd
+}
+ENDMACRO
+
+; TODO: Need a *much* more elegant way of handling this that can interpolate a very small difference over many frames
+; and is aware of precision limits of 16-bit numbers, can accumulate the error, etc...
+MACRO Timeline_BeginTaskInterpolateFromAToB targetAddressOnZP, framesToRun, a, b
+{
+    difference = b - a
+    perFrame = difference / framesToRun
+    Timeline_BeginTaskAddValueThenSetFinal targetAddressOnZP, framesToRun, perFrame, b
+}
+ENDMACRO
+
+; TODO HERE: Add a "number of things to do" arg to TimelineEntryHeader. Then process that number of things.
+
+
+.timelineBanks
+; These have been put here for the moment but really each effect should have its own timeline in its own file.
+.timeline_effect2
+;TimelineEntryHeader tc_waitType_sinceEffectStart, 1
+;Timeline_BeginDecrunch Test_Grid_Full, 4
+
+;TimelineEntryHeaderForFlag tc_waitType_decrunchDone
+TimelineEntryHeader tc_waitType_sinceEffectStart, 100
+TimelineFunction_1Arg tl_fnIndex_swapToEffect, 255
+
+; Timeline that just waits forever (or rather, until there hasn't been a timeline point triggered for 65535 frames)
+.nullTimeline
+TimelineEntryHeader tc_waitType_sinceLastTimelinePoint, 65535
+; No need for an actual timline function!
+.timelineBanksEnd
+
+

@@ -1,0 +1,7 @@
+a RED
+b GREEN
+c BLUE
+d CYAN
+e MAGENTA
+f YELLOW
+g WHITE

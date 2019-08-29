@@ -1,0 +1,61 @@
+Logo Dissolve Effect
+
+This effect -- the first one in the demo -- is based on vertical rupture, not stable raster. The effect reprograms the CTRC each scanline to choose which line of the logo to render (and also changes the palette to control the logo colour) but it does not 'draw' images by palette swapping.
+
+As is common with vrup-based techniques, the 'source' image is very different to the image rendered on-screen. In this case, the source image data consists of each unique line from the Bitshifters logo, repeated eight times. The eight-line offset is necessary because the CRTC can only address lines whose addresses start at an eight-byte alignment. (When setting CRTC addresses, you divide the 'actual' address by eight). In actual fact, because we reset the CRTC start address each scanline, only the first line of every eight is ever displayed on screen, and seven out of every eight lines could be set to anything at all without the effect looking different.
+
+The image was generated from the original Bitshifters logo, using a C# command-line tool written specifically for the task.
+
+The original logo looks like this:
+
+
+And the new image looks like this:
+
+
+(I added the green lines to delineate each unique line. As you can see there are only 13 different lines, including the blank line).
+
+The tool also emits a list of line indices. For each of the 56 lines in the logo image, it lists the corresponding index in the 'unique lines' image, in a format easily ingestible by BeebAsm, specifically something like this (I added the comments manually!):
+
+[code]
+EQUB 2		; First line of logo -- top of b, i, t,     h, i, f, t -- maps to line 2 in the unique lines image
+EQUB 2		; Ditto
+EQUB 0		; Third line of logo is totally blank
+EQUB 2		; Another three lines like the first and second...
+EQUB 2		; ...
+EQUB 2		; ...
+EQUB 0		; And another blank line
+EQUB 1		; Now we're onto a different line. Top of b,    t,    h,       f, t -- maps to line 1 in the unique lines image
+EQUB 1		; etc
+EQUB 0
+EQUB 11
+EQUB 11
+EQUB 0
+(And so on for 56 entries!)
+[/code]
+
+This file is used to create a 256-entry table where each entry is the 'unique line index' (between 0 and 12) to use to render that line. This is done by including the file four times, with some 'EQUB 0s' (blank lines) in between and at the top and bottom.
+
+Another 256-entry table contains the colour to use for each line.
+
+It's interesting to compare TB's effect to this one. Both of them use one-line vertical rupture to choose, per-scanline, which line from an image to draw. (One-line vertical rupture is covered extensively in the Twisted Brain write-up). However Wave Runner 'thins out' the logo vertically, as compared to TB's horizontal movement. The TB version stores two copies of the whole logo, one with a two-pixel offset, and it uses these to move the effect horizontally in two-pixel increments. WR on the other hand stores one 'processed' copy of the logo (each unique line appears only once) and 'moves' them vertically.
+
+This vertical 'splitting' is achieved relatively simply. Before the first visible scanline, we initialise a 16-bit variable (the 'current line pointer' with an initial value. Each scanline, another 16-bit value, the 'per-line offset', is added to the 'current line pointer'. The following logic then happens:
+
+- If the addition involved a carry from the low to high byte, then draw a line from the logo:
+  - Take high byte of 'current line pointer' and use it as index into the 256-entry table of unique line indices.
+  - Take that unique line index and use it to look up into another table of CRTC start addresses. This table contains the start address of each line in the image.
+  - Set CRTC start address to that address.
+  - Also use the high-byte of the 'current line pointer' to look up the colour from the 256-entry table of colours.
+  - Set the palette (by writing to the ULA palette register four times).
+- If, however, the addition did NOT involve a carry from low to high byte, draw a blank line:
+  - Exactly the same logic as above, but force the unique line index to 0, which is the 'blank' line. (Note how the top row of the processed image is a totally empty line).
+  
+Essentially, what this is doing is stepping 'through' the logo by a fractional number of lines for each scanline, but only drawing a logo line when you step to a 'new' line.
+
+Animating the logo to split up is then a simple matter of spawning tasks that interpolate the 'per-line offset' between different values to make the logo expand, contract and then expand again.
+
+There are many ways this effect could be extended but, as with just about everything else, there wasn't time to try them all out! My biggest regret is that the logo expands downwards instead of in both directions. All the infrastructure is in place to do it (all you need is to interpolate the 'starting value' as you change the per-line offset) but, once again, not time to try it out! Perhaps next year...
+
+
+
+

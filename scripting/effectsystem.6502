@@ -1,0 +1,165 @@
+; The 'effect' system handles the state and functions pertaining to tracking
+; which effect is currently running, and how to swap between effects.
+
+; On Entry: A contains effect to move TO
+.moveToEffect
+{
+	PHA		; Push  index of 'new' effect
+	LDY currentEffectIndex
+
+	\\ Call the 'effect cleanup' function for current effect
+	lda swrSlots,y:jsr swr_select_slot		; NOTE: Is this necessary? The SWR slot should already be correctly set...
+	LDA effectCleanupTableHigh,Y
+	STA jumpToCleanup+2
+	LDA effectCleanupTableLow,Y
+	STA jumpToCleanup+1
+	.jumpToCleanup
+	JSR &FFFF
+	PLY		; Pull index of next effect
+	STY currentEffectIndex
+	LDA effectRenderTableHigh,Y
+	STA jumpToFrameRender+2
+	LDA effectRenderTableLow,Y
+	STA jumpToFrameRender+1
+
+	\\ Similarly, change the "Frame update" function, so each effect can have its own per-frame update code. This
+	\\ will be called after the 'render' code, that is, the update code prepares data for the next frame's render.
+	LDA effectUpdateTableHigh,Y
+	STA jumpToFrameUpdate+2
+	LDA effectUpdateTableLow,Y
+	STA jumpToFrameUpdate+1
+
+	\\ And we need to make sure that we're using the correct SWR bank for the effect!
+	LDA swrSlots, Y
+	JSR swr_select_slot
+
+    \\ Reset the "time since effect started" counter to zero
+    STZ timeSinceEffectStart
+    STZ timeSinceEffectStart + 1
+
+	; Set timeline bank start address to the one specified for this effect
+	LDA effectTimlineAddressTableLow,Y
+	STA memoryReaderBasePtrAddress
+	LDA effectTimlineAddressTableHigh,Y
+	STA memoryReaderBasePtrAddress + 1
+
+	; Make sure to reset timeline position to beginning of timeline for the effect.
+	; TODO: Later we could consider jumping back into effects with different setup fns and
+	; different timeline starts...
+	STZ memoryReaderOffset
+
+	\\ Finally, call the "effect setup" function for the new effect
+	LDA effectPrepareTableHigh,Y
+	STA jumpToPrepare+2
+	LDA effectPrepareTableLow,Y
+	STA jumpToPrepare+1
+	.jumpToPrepare
+	JMP &FFFF
+}
+.moveToEffectEnd
+
+.moveToNextEffect
+{
+	LDA currentEffectIndex
+	CLC
+	ADC #1
+	CMP #effectCount
+	BNE indexReady
+	\\ If we went past the last effect (new index == effect count) then reset to first effect (index = 0)
+	LDA #0
+	.indexReady
+	JMP moveToEffect
+}
+.moveToNextEffectEnd
+
+.NullUpdate
+jmp EffectUpdateReturn
+.NullUpdateEnd
+
+; TODO: This is ugly and should just be replaced by EQUBs and a block-memory-copy!
+MACRO AddEffect fnIndex, renderFn, updateFn, prepareFn, cleanupFn, tlBankAddress, swrSlot, shadowState
+    ASSERT fnIndex < effectCount
+    LDA #HI(renderFn)
+    STA effectRenderTableHigh + fnIndex
+    LDA #LO(renderFn)
+    STA effectRenderTableLow + fnIndex
+    LDA #HI(updateFn)
+    STA effectUpdateTableHigh + fnIndex
+    LDA #LO(updateFn)
+    STA effectUpdateTableLow + fnIndex
+
+    LDA #HI(prepareFn)
+    STA effectPrepareTableHigh + fnIndex
+    LDA #LO(prepareFn)
+    STA effectPrepareTableLow + fnIndex
+
+    LDA #HI(cleanupFn)
+    STA effectCleanupTableHigh + fnIndex
+    LDA #LO(cleanupFn)
+    STA effectCleanupTableLow + fnIndex
+
+	LDA #HI(tlBankAddress)
+	STA effectTimlineAddressTableHigh + fnIndex
+	LDA #LO(tlBankAddress)
+	STA effectTimlineAddressTableLow + fnIndex
+
+	LDA #swrSlot
+	STA swrSlots + fnIndex
+
+	LDA #shadowState
+	STA shadowStates + fnIndex
+ENDMACRO
+
+shadowState_MemoryShadow_DisplayNormal = %00001100
+shadowState_MemoryNormal_DisplayNormal = %00001000
+shadowState_MemoryShadow_DisplayShadow = %00001101
+shadowState_MemoryNormal_DisplayShadow = %00001001
+
+fxIndex_BSLogo = 0
+fxIndex_ResetCRTC = 1
+fxIndex_TitleScreen = 2
+fxIndex_Scrolltext = 3
+fxIndex_ThinSine = 4
+fxIndex_Blobs = 5
+fxIndex_Cheq = 6
+fxIndex_Outro = 7
+;fxIndex_TestEffect = 7
+
+\\ TODO The way we specify SWR slots and indeed effect slots and addresses is ugly. Needs refactoring to be less brittle.
+.EffectDeclaration
+    AddEffect fxIndex_BSLogo, BitshiftersLogo_Render, BitshiftersLogo_Update, BSLogo_Start, BSLogo_Shutdown, BitshiftersLogo_Timeline, 4, shadowState_MemoryNormal_DisplayNormal
+	AddEffect fxIndex_ResetCRTC, ResetCRTC, NullUpdate, ResetCRTCBegin, nullFunction, timeline_resetCRTC, 4, shadowState_MemoryNormal_DisplayNormal
+	; BSLogo_Shutdown in line below is used simply because all it does it set an all-black palette
+	AddEffect fxIndex_TitleScreen, TitleScreenRender, TitleScreenUpdate, TitleScreenSetup, BSLogo_Shutdown, timeline_titleScreen, 4, shadowState_MemoryNormal_DisplayShadow
+    AddEffect fxIndex_Scrolltext, ScrolltextRenderStart, ScrolltextUpdateStart, ScrollTextEffectSetup, StopAllTasks, timeline_scrolltext0, 5, shadowState_MemoryNormal_DisplayNormal
+	AddEffect fxIndex_ThinSine, ThinSineStart, ThinSineUpdate, ThinSineSetup, StopAllTasks, timeline_doubleSine, 5, shadowState_MemoryNormal_DisplayNormal
+	AddEffect fxIndex_Blobs, BlobsRender, BlobsUpdate, BlobsPrepare, BlobsCleanup, blobsTimeline, SLOT_BLOBS, shadowState_MemoryNormal_DisplayNormal
+	AddEffect fxIndex_Cheq, cheqRender,cheqUpdate,cheqPrepare,cheqCleanup,cheqTimeline,SLOT_CHEQ,shadowState_MemoryNormal_DisplayNormal
+    AddEffect fxIndex_Outro, OutroRender, OutroUpdate, OutroSetup, nullFunction, timeline_outro, 4, shadowState_MemoryNormal_DisplayNormal
+
+;    AddEffect fxIndex_TestEffect, TestEffectStart, NullUpdate, nullFunction, nullFunction, timeline_effect2, 4, shadowState_MemoryNormal_DisplayNormal
+;	AddEffect 8, ResetCRTC, NullUpdate, nullFunction, nullFunction, timeline_resetCRTC, 4, shadowState_MemoryNormal_DisplayNormal
+
+	; AddEffect 9,prRender,prUpdate,prPrepare,prCleanup,prTimeline,SLOT_PR,shadowState_MemoryNormal_DisplayNormal
+
+	\\ Move to first effect, by setting 'current effect' to be the final effect, then calling the fn that moves to next effect.
+	LDA #effectCount - 1
+	STA currentEffectIndex
+	JSR moveToNextEffect
+
+.nullFunction
+    RTS
+.EndEffectDeclaration
+
+; Simple function to zero out the effect workspace. This is useful if you want your effect to start with the workspace
+; set to all zeros.
+.ZeroEffectWorkspace
+{
+	LDX #effectWorkspaceSize
+	.loop
+	DEX
+	STZ effectVariables,X
+	BNE loop
+	RTS
+}
+.ZeroEffectWorkspaceEnd

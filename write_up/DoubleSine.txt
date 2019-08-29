@@ -1,0 +1,87 @@
+Vertical Double Sine Wibbler
+
+This effect uses stable raster to render a superposition of two sine waves on. Each wave can have its left/right movement speed and vertical scale adjusted independently, and by choosing values carefully a variety of nice-looking patterns can be created.
+
+When the effect starts, the whole screen is filled with the value &F, and the ULA is set to MODE1. This means that by changing the palette register for just one entry (the one that maps logical colour %1111 to a physical colour) you can change the black 'background' colour. As the effect progresses, various images are decrunched to the screen, but they are all set up so the right hand side (where the wave effect takes place) side stays filled with &F, and all of the palette changes that alter the look of the images (which only appear on the left) leave logical colour &F set to black.
+
+The effect uses a 256-entry sine table whose values vary between 0 and 14. During frame update, 16-bit additions are performed to step two pointers 'through' the table, to provide new 'start values' for the two waves. To draw the wave at frame render, the two waves start at the 'start value' and for each scanline, they step through the sine table (16-bit addition again) and take the high byte of the result as an index into the table. Two sine values (varying between the values 0 and 14) are thus retrieved from the table, summed together (giving a possible range of 0-28).
+
+This value between 0 and 28 is used to select one of 29 hand-crafted functions. Each of these functions essentially does:
+
+- Wait(first)
+- Write to palette register to change logical colour &F to a colour. (See below for how the colour is chosen!)
+- Wait(second)
+- Write to palette to change colour &F back to black.
+
+... where wait(first) and wait(second) always sum to the same value.
+
+However, there is an additional complication. The effect was originally monochrome and always used the same colour (white). This meant that to achieve the "wait(delay)/write palette/wait(inversed delay)/write palette" behaviour, all you needed was two clockslides.
+
+But when I added colour, I used the tried-and-tested '16-bit add, then use high byte as an index' technique to grab colour values from another 256-entry table. By choosing different step speeds, it is possible to create different colour movement patterns. All of the moving colours in the sine wave are generated from the same colour table:
+
+This meant that in addition to the above, the code is also doing (per line):
+
+- 16-bit add to step through the colour table.
+- Use high byte to index into colour table and retrieve palette entry.
+
+... and the code that does this is interleaved among the 'wait' and 'write palette' instructions. That is why there are 29 different functions. Each one does the same thing, but the order and timing of operations changes for each one to ensure the two palette writes are at the right time.
+
+For instance, here's the function that delays by 0:
+
+.delay_0
+    NOP
+    ; First part of a 16-bit add: low byte of (colour index per line + colour scale)
+    LDA sineEffects_ColourIndexPerLineLow ; 3
+    ADC sineEffects_ColourScaleLow ; 3
+    STA sineEffects_ColourIndexPerLineLow ; 3
+
+    ; At this point, we've added the low byte, we have carry flag set appropriately... so we can load the 'current'
+    ; high byte, store it to palette reg, and then get on with adding the high addend to it.
+    LDX sineEffects_ColourIndexPerLineHigh ; 3
+    LDA colourTable,X    ;4
+
+    ; Additional wait before store to palette register.
+    WAIT_16
+    STA &FE21
+
+    ; then need another 17 cycles before the store of black colour (ie 15 before the LDA #im (black colour))
+    TXA ; 2 -- put index-per-line-high back into A
+    ADC sineEffects_ColourScaleHigh ; 3
+    STA sineEffects_ColourIndexPerLineHigh ; 3
+    WAIT_3
+    lda #mainColToBlack \ 2
+    sta &FE21 \ 4
+    JMP thinSinReturn
+	
+And here's the one that delays by 28:
+
+
+.delay_28
+    LDX sineEffects_ColourIndexPerLineHigh ; 3
+    LDA colourTable,X    ;4
+    STA &FE21
+
+    NOP ; 2
+
+    LDA sineEffects_ColourIndexPerLineLow ; 3
+    ADC sineEffects_ColourScaleLow ; 3
+    STA sineEffects_ColourIndexPerLineLow ; 3
+
+    TXA ; 2 -- put index-per-line-low back into A
+    ADC sineEffects_ColourScaleHigh ; 3
+    STA sineEffects_ColourIndexPerLineHigh ; 3
+    WAIT_19
+    lda #mainColToBlack \ 2
+    sta &FE21 \ 4
+    JMP thinSinReturn
+
+(The WAIT_XX macros insert a series of NOPs plus possibly an additional 1-cycle NOP to achieve the desired wait time).
+
+(As an aside... I think it would be interesting to explore dynamically generating this sort of code at runtime instead of creating it by hand!)
+
+All of this, of course, has to run in exactly 128 cycles per scanline! In actual fact there are some cycles spare, because the WAIT_XX macros are 'dead' cycles that could be put to use somehow. I considered various possibilities but didn't have time to try them out.
+
+The 'fade waves up down' effect (which is used to change between patterns) is done by patching the code that loads
+from the sine table to refer to a variety of different tables which were pre-generated for different amplitudes. Essentially the effect render code is redirected to a variety of different sine tables over the course of a few seconds, to fade the amplitude down from 14 to 0, then swap the values that control the wave pattern to new values, then interpolate the amplitude back from 0 to 14.
+
+The initial fade from white to coloured, and the final fade from coloured to black, is done by spawning tasks which copy values from predefined tables of colours (palette entries) to the 'actual' colour table. The indices to copy each frame are chosen from a table of random numbers (the numbers 0-255 in random order) which is how we get the nice random-looking 'fade in' and the 'fade out' at the end.

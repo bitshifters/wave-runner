@@ -1,0 +1,54 @@
+;*************************************
+; Effect: Title screen
+;
+; This is probably the simplest effect in the demo. It starts with the palette set to all black and the display
+; rendering from shadow memory, waits for a while, sets the standard MODE2 palette (thus showing the first
+; "Bitshifters presents" image), initiates a decrunch of the second ("Wave Runner") image to main memory, waits
+; a bit longer and then swaps to rendeirng from main memory, thus instantly swapping to the new image.
+;
+;*************************************
+
+; The effect is so simple that both the Render and Update functions do nothing!
+.TitleScreenRender
+JMP EffectRenderReturn
+
+.TitleScreenUpdate
+JMP EffectUpdateReturn
+
+.TitleScreenSetup
+; Set to MODE2, all colours black.
+LDA #&F4
+STA &FE20
+LDA #HI(paldata_Mode1_Black)
+LDY #LO(paldata_Mode1_Black)
+JSR SetPalette_Mode1
+RTS
+
+.timeline_titleScreen
+TimelineEntryHeader tc_waitType_sinceDemoStart, 15*50 + 25
+Timeline_BeginDecrunch TitleScreen, 4
+
+TimelineEntryHeaderForFlag tc_waitType_immediate
+TimelineFunction_2Arg fl_fnIndex_setPaletteMode2, HI(paldata_mode2), LO(paldata_mode2)
+
+; The below isn't working because of a bug where beginning decrunch goes to wrong 'render from shadow or main'
+; state. So instead we do the stuff above, where we kick off the crunch *before* flipping the palette
+if 0
+TimelineEntryHeader tc_waitType_sinceDemoStart, 15*50 + 25
+TimelineFunction_2Arg fl_fnIndex_setPaletteMode2, HI(paldata_mode2), LO(paldata_mode2)
+
+TimelineEntryHeader tc_waitType_sinceLastTimelinePoint, 25
+Timeline_BeginDecrunch TitleScreen, 4
+endif
+
+; Rewrite this effect's table entry for shadow/main memory state, thus swapping from 'display shadow' to 'display main'
+TimelineEntryHeader tc_waitType_sinceDemoStart, 23*50
+Timeline_SetAddressToValue_8bit (shadowStates + fxIndex_TitleScreen), shadowState_MemoryNormal_DisplayNormal
+
+TimelineEntryHeader tc_waitType_sinceDemoStart, 31*50
+TimelineFunction_1Arg tl_fnIndex_swapToEffect, 255
+
+
+
+
+

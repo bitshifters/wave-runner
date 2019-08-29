@@ -1,0 +1,41 @@
+TODO:
+
+- Implement version that has SECONDARY colour table and also sets that (two palette entries need setting!)
+- Implement code to partially/fully swap the delay functions, so you get a non-linear sine pattern.
+- Implement code that looks up colours in a 29-long table according to delay, instead of in the colour table.
+- Make it possible to swap from 256-long colour table to 28-long table.
+- Investigate using vrup to change the screen pattern!
+
+
+What do I want to achieve?
+
+
+- Nice-looking undulating pattern which wibbles across the screen.
+
+- Starts as a simple black/white line, then slowly starts morphing into dynamic, living pattern.
+
+- Moves from one side of screen to another to reveal an image.
+
+- Then back again to reveal changed image?
+
+
+- The transitions between one pattern and the next should be 'smooth' and 'nice', and not just lerps.
+
+- Some kind of 'pulse' that starts at low intensity, builds up then fades away again leaving a different pattern in effect...
+
+
+So to do this:
+
+- Want to be able to play with patterns, then save out relevant values. Then easily interpolate from one set to another.
+
+- To interpolate from one to another, we need an 'interpolate from ... to ... ' macro.
+
+The macro works out the difference to apply per frame, and applies a correction to take it to the 'final' value on the final frame.
+
+
+Then try saving out a few nice patterns, and seeing whether can interpolate between them.
+
+
+Need a "kill all tasks" function which can be used when transitioning between effects?
+
+

@@ -1,0 +1,44 @@
+Ideas
+
+- Vertical / horizontal scrolltext in the middle of the screen, by working out which character you're on, which pixel-line of the character, and jsr-ing to a routine that plots that line then returns in constant time.
+
+
+Frame update could CHANGE the screen, allowing for masking effects.
+
+This changing the screen could also be used to transition into/out of effects, by writing or removing whole lines (or indeed patterns) progressively. Turn whole line white, then black to fade out, etc.
+
+Might need to ensure that the patterns are aligned on character boundaries to avoid the bit-shifting ULA problem. (Or just don't worry about it?)
+
+Post-processing ... change the colours for part of the screen, then change back again.
+
+Tech notes / things to remember
+
+Investigate calculating the cycles to delay simply by loading the offset for 'this' line, offset for 'previous' line, and subtracting. Much easier than working out the per-line difference in the sin/cos value (which needs you to accumulate the error, and can't easily be scaled because you need to add up all the per-line differences!)
+
+Could introduce extra cycle or two of delay (funny post-processing?) by dynamically inserting / removing different-timed instructions into a point at the end of the raster that has the effect of shifting all the remaining lines left/right a bit, then "undo" it a few lines later.
+
+
+
+
+
+EFFECT IDEA:
+
+Have a solid line of colour in the middle of the screen. Each line:
+
+- Work out where it starts. Delay until then, then change colour.
+- Work out how wide it is. Delay. Then change back.
+- Work out remainder. Delay until next line.
+
+Key point one: This gives us enough time (maybe) for a 16-bit add, hence can shift left/right more smoothly and varyingly.
+Key point two: Can do the per-line offset 16-bit so can move through the pattern at varying speeds.
+KP3: No need for per-line additional delay to shift entire pattern left/right unless we wanted to add that as well.
+KP4: Could then do different speeds / patterns on alternating (even every 3/4 lines) lines.
+KP5: Then start thinking about CHANGING the COLOUR on an odd/even frame basis to oscillate between two colours -> non-saturated colours.
+KP6: Extend so that the screen is filled with a 2- or 4-colour pattern, and which logical are set to which physical changes
+both on a per-line basis and a per-frame basis -> temporal stippling.
+
+
+EFFECT IDEA:
+
+Pre-generated pattern of lines which render a cube / sphere / whatever spinning... Each line in the h-blank you self-modify
+the code (or a small table which is then read) to change the colours for the next line...? 

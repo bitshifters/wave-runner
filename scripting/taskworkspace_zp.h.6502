@@ -1,0 +1,10 @@
+maxTasks = 6				\\ How many tasks there can be in total, ie how many task blocks there are.
+maxTaskIndex = maxTasks - 1
+taskBlockDataSize = 6       ; Max number of 
+.taskWorkspace
+.taskLoopCountersHigh SKIP maxTasks
+.taskLoopCountersLow SKIP maxTasks
+.taskFnPtrsHigh SKIP maxTasks
+.taskFnPtrsLow SKIP maxTasks
+.taskBlocks SKIP maxTasks * taskBlockDataSize
+.taskWorkspaceEnd

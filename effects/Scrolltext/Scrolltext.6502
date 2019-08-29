@@ -1,0 +1,877 @@
+;*************************************
+; Effect: Vertical scrolltext
+;
+; This effect draws large characters on the screen which scroll upwards. In addition to normal characters, a
+; number of 'control codes' can be inserted into the scrolltext to do things like change colour, speed, and how
+; fast the scrolltext 'wibbles'.
+;
+; Each line of a character is drawn by writing to the ULA palette register at known intervals. The data that
+; drives the render function is simply a 256-entry table of codes, one for each line on the screen, that either
+; specifies one line of a glyph, or is a special control code.
+;
+; The scrolltext follows a sine wave, defined by a 256-entry table which contains one sine loop with values
+; between 0 and (scrolltextWaveSize * 2), ie between 0 and 48.
+; 
+; The shape of the scrolltext is defined by three parameters:
+; - sinWaveStartIndex : The location in the sine table at which the first (top) screen line starts.
+; - xWibbleSpeed : The rate at which sinWaveStartIndex is incremented per frame. The faster it increments, the
+;                  more quickly the text moves left and right over time.
+; - yScaleFactor : The rate at which the sin table offset is incremented for each line of one frame. The higher
+;                  it is, the more 'squashed' the scrolltext appears.
+
+; The render function does the following:
+; - First it looks up into a table of sine values. The lookup position is based on the current 'start position' in the table.
+; - Delay by a variable number of cycles, based on the lookup value. This positions the first line at the right place.
+; - Loop 256 times doing:
+;   - Look up into a 256-entry table of indices which specify which 'glyph line drawing' function to call on each scanline.
+;   - Call the line drawing function. This draws one line of one glyph by changing a palette entry.
+;   - Add a constant to the 'current position in sine table' to obtain new position.
+;   - Calculate difference between previous and new position.
+;   - Delay by the appropriate number of cycles to start the next line in the right place.
+;   - Step to the next index in the 256-entry table of glyph line drawing functions.
+;
+; And the update function does the following:
+; - Update the variables which define the shape of the pattern: left/right wibble and vertical scale.
+; - Erase N lines from the 256-entry table of glyph line drawing function indices, replacing them with new ones.
+; (The 256-entry table is essentially a circular buffer. Erasing the 'oldest' entries, replacing them with new ones,
+; and updating the pointer which says which one is the 'first' is what makes the text scroll.)
+;
+;*************************************
+
+
+; Effect slots.
+
+; Where in sin table we START FROM each frame ie how far through the table the pattern 'starts' at top of screen.
+; ie this is how far left/right the scrolltext top line is.
+sinWaveStartIndexHigh = effectVariables
+sinWaveStartIndexLow  = effectVariables + 1
+
+; Added to sinWaveStartIndex each frame. This therefore controls how rapidly the scrolltext wibbles left and right.
+xWibbleSpeedLow       = effectVariables + 2
+xWibbleSpeedHigh      = effectVariables + 3
+
+; How fast we move through the table as we move down the screen. Thus control how many times the sine pattern
+; repeats on the screen.
+yScaleFactorHigh      = effectVariables + 4
+yScaleFactorLow       = effectVariables + 5
+
+; Modifies lineFunctionsStartIndex which is scrolltext 'start pos in line fns buffer'. So this is rate
+; of change of scrolltext position, ie basically it is scrolltext speed.
+scrolltextSpeedHigh = effectVariables + 6
+scrolltextSpeedLow = effectVariables + 7
+
+; lineFunctionsStartIndex = Current offset into the LineFunctions buffer, ie, where in the 256-entry table of raster functions
+; is the 'first one' that gets drawn on the top line of the screen. Changing this effectively advances the scrolltext
+; by N screenlines.
+lineFunctionsStartIndexHigh = effectVariables + 8
+lineFunctionsStartIndexLow = effectVariables + 9
+
+; As we move through the table on each line of the frame, we change the sin offset per line. This is value for current line.
+sinTableCurrentIndexHigh = effectVariables + 10
+sinTableCurrentIndexLow = effectVariables + 11
+
+; The starting address of the current scrolltext bank. Copied into memoryStream at start of update and back again afterwards
+scrollTextAddressLow = effectVariables + 12
+scrollTextAddressHigh = effectVariables + 13
+
+; Current offset from start of current scrolltextbank. Copied into memoryStream stuff at start of update, copied back out
+; to here afterwards!
+scrollTextOffset = effectVariables + 14
+
+; This is used during the effect update to store information about the current glyph (character).
+glyphInfo = effectVariables + 16
+
+; The current colour of the scrolltext. This is loaded into a regsiter each line, just before the jump to the function
+; that draws the glyph line.
+textColour = effectVariables + 17
+
+\\ Keep track of where we are in the scrolltext.
+scrollTextCharPos   = effectVariables + 18		\\ Which character in scrolltext
+scrollTextCharLine  = effectVariables + 19		\\ Which line of the character
+scrollCharLineCount = effectVariables + 20		\\ How many times we have repeated the line so far
+
+; The colour to start at on the first line.
+startColour = effectVariables + 21
+
+; Not currently used. The two variables below were part of an experiment to stretch the length of characters
+; dynamically, so some would be shorter than others and they could even change scale within one character.
+; It worked but it just looked odd, so we didn't pursue it further.
+; screenLinesPerScrollLineIndex SKIP 1 \\ How many lines on-screen for one line of a font glyph
+; screenLinesPerScrollLineChangeSpeed SKIP 1
+
+; a 256-entry table where each entry is an index into the line address table. This table defines which
+; 'glyph line drawing function' will be called for each screen scanline.
+.lineFunctions
+ALIGN &100
+FOR n,0,255
+EQUB 0
+NEXT
+
+ALIGN &100
+.ScrolltextRenderStart
+{
+    \\ On the first line (the last non-visible line), delay by an amount appropriate to start the first 'actual'
+    \\ (visible) line in the right place.
+
+    WAIT_6
+
+    ; This is a bug: the scrolltext was meant to request that the screen be cleared in the background
+    ; only once when it started, but it is actually reqesting a clear of the screen each frame.
+    ; The practical effect of this is that the screen is continually being cleared during background processing,
+    ; but since we ran out of time to add stuff to this effect that makes use of the screen memory contents,
+    ; we never noticed and the demo shipped with this bug to no ill effect!
+    LDA #1
+    STA clearScreenRequested
+
+    ; Copy the 16-bit 'current table offset' counter into our 'per-line' offset variable, then
+    ; load a sine value from the table, store it in previous ready for the first loop iteration.
+    LDX sinWaveStartIndexLow
+    STX sinTableCurrentIndexLow
+    LDX sinWaveStartIndexHigh
+    STX sinTableCurrentIndexHigh
+    LDA sintable,X
+    STA previous
+
+{
+    ; Here we are dynamically chaging the amount by which the branch instruction below jumps forward. Google
+    ; "6502 Clockslide" for details of the technique. The effect is to waste (48-sineValue) clock cycles. This
+    ; ensures that the pattern starts in the right place (with respect to the raster scanning) for the first
+    ; line's offset value.
+    sta sinSlide+1 \4 = 118
+
+    .sinSlide
+    bpl sinSlide   ; This could have been a BRA. It always branches because the table values range from 0 to 48
+    ; 48-cycle clockslide.
+    cmp #&C9 : cmp #&C9 : cmp #&C9 : cmp #&C9 : cmp #&C9
+    cmp #&C9 : cmp #&C9 : cmp #&C9 : cmp #&C9 : cmp #&C9
+    cmp #&C9 : cmp #&C9 : cmp #&C9 : cmp #&C9 : cmp #&C9
+    cmp #&C9 : cmp #&C9 : cmp #&C9 : cmp #&C9 : cmp #&C9
+    cmp #&C9 : cmp #&C9 : cmp #&C9 : cmp &EA
+    .endSinSlide
+}
+
+    \\ Start at a specific point in the lineFunctions buffer, and loop until we get back to that point.
+    \\ (If this was upgraded to draw to less than full vertical width of 256-line screen, this logic would need altering).
+    ldy lineFunctionsStartIndexHigh
+
+    .loop
+{
+.loadScrollTextStartIndex
+    ; Load index of line function, based on loop index...
+    LDX lineFunctions,y        ; 4
+    ; ... and use that index obtain retrieve the address of the line function itself from LineAddressTable,
+    ; then set the target of the JMP instruction below to that address.
+    LDA LineAddressTableLow,X  ; 4
+    STA jumpToLineFn + 1       ; 4
+    LDA LineAddressTableHigh,X ; 4
+    STA jumpToLineFn + 2       ; 4
+
+    ; Load black (background) colour to X, and foreground colour to A. Lines that want to use other colours
+    ; must load them (using A and X but not Y) which means they can't draw graphics right at the left part
+    ; of the glyph. This could be avoided by having the "load black and foreground" as part of the
+    ; line code but then this would be repeated for every line, thus needing more space.
+.setScrolltextBGCol
+    ldx #mainColToBlack ; 2
+.*setScrolltextFGCol
+    lda textColour      ; 3
+
+    ; Call the glyph line drawing function.
+.^jumpToLineFn
+    jmp &0000           ; 3
+}
+
+; All glyph line drawing functions JMP here when they're finished.
+.^lineReturn
+    ; To obtain the next value, step forwards through the sine table by adding yScaleFactor.
+    ; Note that this is a 16-bit addition. We use the high byte of the result as the index into the table.
+    ; This allows for stepping through the table by a fractional amount each line.
+    SixteenBitAdd sinTableCurrentIndexHigh, sinTableCurrentIndexLow, yScaleFactorHigh, yScaleFactorLow \\ 40c -> 84c
+
+    ; We now need to delay (waste CPU cycles) by the difference between the current line's sine offset value, and the
+    ; previous line's. To do this we subtract the previous from the current, and use that to control another clockslide. 
+    TAX             \\ 2    A contains high byte of previous addition operation
+    LDA sintable,X  \\ 4    Use that to load from sine table
+    TAX             \\ 2
+    SEC             \\ 2
+    SBC previous    \\ 3    Subtract previous from current
+    CLC             \\ 2
+    STX previous    \\ 3    Store the current sine offset into previous, ready for next time through loop
+    ADC #7          \\ 2    Avoid negative values by scaling -7:7 to 0:14
+
+    \\ 104c
+{
+    ; Store a value between 0:14 to branch offset below.
+    ; Note: This means that you must not set the y scale factor too large. If you do, the asboluste difference between
+    ; the sine table values between one line and the next may get larger than 7, and this logic will break horribly.
+    sta sinSlide+1 \4 = 108
+
+    .sinSlide
+    ; Clockslide, valid offsets are 0:14
+    bpl sinSlide   \ If not taken (x is 0)  ... ?
+    cmp #&C9
+    cmp #&C9
+    cmp #&C9
+    cmp #&C9
+    cmp #&C9
+    cmp #&C9
+    cmp &EA    \\ Variable delay
+    .endSinSlide
+}
+    ; Skip to next line...
+    iny \ 2 == 125
+    ; ... if we've done 256 lines, break out of loop.
+    CPY lineFunctionsStartIndexHigh
+    bne loop \ 3 == 128
+    ; If we left loop, then render is finished for this frame.
+    jmp EffectRenderReturn
+}
+.ScrollTextRenderEnd
+
+
+.ScrolltextUpdateStart
+{
+; Set up memory stream reader so it's reading from the scrolltext bank
+SetupMemoryStreamReader scrollTextAddressLow, scrollTextOffset
+
+; There now follows a large section of debugging code that was used to find nice scrolltext patterns early during
+; development but is obsolete in the released demo because keyboard input is disabled.
+
+; *****BEGIN DEBUGGING KEYBOARD-READNG CODE
+
+; Read keyboard. Update shift speed and scale accordingly.
+LDA #1
+STA isShiftPressed
+
+LDA #&00 \\ Left shift -- 10x multiplier on how much to add/subtract for the other keys
+STA &FE4F
+LDA &FE4F  \ N flag = whether key is pressed
+BPL shiftNotPressed
+LDA #10
+STA isShiftPressed
+.shiftNotPressed
+LDA #&01 \\ Ctrl -- really speed up (add 50)
+STA &FE4F
+LDA &FE4F  \ N flag = whether key is pressed
+BPL ctrlNotPressed
+LDA #50
+STA isShiftPressed
+.ctrlNotPressed
+LDA #&19 \\ cursor Left -- decrease sine shift speed
+STA &FE4F
+LDA &FE4F  \ N flag = whether key is pressed
+BPL cursorbarLeftNotPressed
+SixteenBitSubEightBit xWibbleSpeedHigh, xWibbleSpeedLow, isShiftPressed
+.cursorbarLeftNotPressed
+LDA #&79 \\ cursor right -- increase sine shift speed
+STA &FE4F
+LDA &FE4F  \ N flag = whether key is pressed
+BPL cursorRightNotPressed
+SixteenBitAddEightBit xWibbleSpeedHigh, xWibbleSpeedLow, isShiftPressed
+.cursorRightNotPressed
+LDA #&29 \\ cursor down -- decrease sine scale
+STA &FE4F
+LDA &FE4F  \ N flag = whether key is pressed
+BPL cursorDownNotPressed
+SixteenBitSubEightBit yScaleFactorHigh, yScaleFactorLow, isShiftPressed
+.cursorDownNotPressed
+LDA #&39 \\ cursor up -- increase sine scale
+STA &FE4F
+LDA &FE4F  \ N flag = whether key is pressed
+BPL cursorUpNotPressed
+SixteenBitAddEightBit yScaleFactorHigh, yScaleFactorLow, isShiftPressed
+.cursorUpNotPressed
+LDA #&41 \\ A -- decrease width shift speed
+STA &FE4F
+LDA &FE4F  \ N flag = whether key is pressed
+BPL aNotPressed
+SixteenBitSubEightBit scrolltextSpeedHigh, scrolltextSpeedLow, isShiftPressed
+.aNotPressed
+LDA #&32 \\ D -- increase width shift speed
+STA &FE4F
+LDA &FE4F  \ N flag = whether key is pressed
+BPL dNotPressed
+SixteenBitAddEightBit scrolltextSpeedHigh, scrolltextSpeedLow, isShiftPressed
+.dNotPressed
+LDA #&33 \\ R -- reset pattern
+STA &FE4F
+LDA &FE4F  \ N flag = whether key is pressed
+BPL rNotPressed
+JSR ScrollTextEffectSetup
+.rNotPressed
+; *****END DEBUGGING KEYBOARD-READNG CODE
+
+; Remember which was the previous 'start index' into the line functions table before we update it...
+LDX lineFunctionsStartIndexHigh
+
+; Step forwards through sine table by xWibbleSpeed. This has the effect of moving the pattern left/right.
+SixteenBitAdd sinWaveStartIndexHigh, sinWaveStartIndexLow, xWibbleSpeedHigh, xWibbleSpeedLow
+
+; Change which index in the 256-entry table of glyph-line-rendering functions is the 'start' one (the one
+; used for the topmost line when rendering starts). Doing this is what causes the scrolltext characters to scroll
+; up the screen.
+SixteenBitAdd lineFunctionsStartIndexHigh, lineFunctionsStartIndexLow, scrolltextSpeedHigh, scrolltextSpeedLow
+
+; It is now necessary to remove N lines from the line functions table, where N is the number of lines that
+; the scrolltext just scrolled by, ie the difference between the old lineFunctionsStartIndexHigh and the new value.
+; N lines are also added to the table. These are worked out from the scrolltext characters, by looking up into 
+; a number of tables (one for each character) that define which line function to use for each line of the glyph.
+{
+    ; Loop from 'old' start index to 'new' start index value
+    .loop
+    ; Update index for line whose index is in Y
+
+    ; Load character index using memoryReaderOffset as ptr into scrollText
+    LDY memoryReaderOffset
+    LDA (memoryReaderBasePtrAddress),Y
+
+    ; If 'special char' bit is set (the top bit) branch to 'handle special byte' fn, then advance to next char.
+    ; If 'N' flag is set this implies bit 7 was set, ie top bit, ie special char.
+    BPL doneSpecialCharCheck
+    JSR HandleSpecialChar
+    BRA loop ; If we handled a special character, always branch back to loop start and process the next character!
+    .doneSpecialCharCheck
+
+    ; Load glyph address from glyphAddressTableHigh/Low using the byte loaded from the scrolltext stream as the offset.
+    ; Write that address to load target...
+    TAY
+    LDA glyphAddressTableHigh,Y
+    STA loadGlyphLine+2
+    STA loadGlyphInfoByte+2
+    LDA glyphAddressTableLow,Y
+    STA loadGlyphLine+1
+    STA loadGlyphInfoByte+1
+    
+    ; Load and remember 'glyph info' byte which is currently just line-count
+    .loadGlyphInfoByte
+    LDA &FFFF
+    CLC
+    ; Add one because it makes the calculations easier in the places that we compare against glyphInfo
+    ; (ie against number of lines in the glyph + 1) to check whether we need to move to the next glyph
+    ; or just to the next line in the current glyph.
+    ADC #1
+    STA glyphInfo
+
+    ; Retrieve value indicating which line of the glyph we're currently on...
+    LDY scrollTextCharLine
+    ; (Target amended by code above) ... and use that to retrieve index into global glyph lines table
+    .loadGlyphLine
+    LDA &FFFF,Y
+    ; And here is where we actually update the 256-entry table with that index, thus saying which line drawing function
+    ; will be used to render that line on the screen.
+    STA lineFunctions,X
+
+    ; Here we deal with the fact that one 'line' in the glyph occupies several lines on the screen. Each glyph line
+    ; is copied into the line functions buffer <screenLinesPerScrollLine> times.
+    ; scrollCharLineCount tracks how many times the current glyph line has been added to the line function buffer.
+    screenLinesPerScrollLine = 4
+    LDY scrollCharLineCount
+    INY
+    CPY #screenLinesPerScrollLine
+    BMI doneLineRepeatCheck
+    LDY #0      ; If we we have copied <screenLinesPerScrollLine> copies of the glyph line to linefunctions, reset
+                ; scrollCharLineCount to 0 because we will be starting another glyph line.
+    .doneLineRepeatCheck
+    STY scrollCharLineCount
+    ; If zero, then we must move to next line... otherwise done
+    CPY #0      
+    BNE doneAll
+
+    .moveToNextLine
+    LDY scrollTextCharLine
+    INY
+    CPY glyphInfo     ; TODO glyphInfo is currently (just number of lines in the glyph +1) ... if we add more bits will need to mask them out.
+    BNE doneLineOfCharCheck
+    LDY #1
+
+    .doneLineOfCharCheck
+    STY scrollTextCharLine
+    CPY #1
+    BNE doneAll
+
+    .moveToNextChar
+    LDY memoryReaderOffset
+    INY
+    INC memoryReaderOffset
+
+    .doneAll
+
+    ; loop until we have updated N entries in the 256-entry line functions table.
+    INX
+    CPX lineFunctionsStartIndexHigh
+    BNE loop
+
+    ; Copy current memory stream reader bank address and offset back to the 'scrolltext-specific' versions of those variables.
+    StoreMemoryStreamReaderState scrollTextAddressLow, scrollTextOffset
+}
+
+
+; Ensure that on the next frame the foreground colour is set to the last colour-change-code that was at the top of the screen.
+LDA startColour
+STA textColour 
+
+; The four lines below were part of an experiment to stretch the scrolltext characters.
+; LDA screenLinesPerScrollLineIndex
+; CLC
+; ADC screenLinesPerScrollLineChangeSpeed
+; STA screenLinesPerScrollLineIndex
+
+JMP EffectUpdateReturn
+.ScrolltextUpdateEnd
+}
+
+
+.HandleSpecialChar
+; On entry: A is code of special char, with high bit still set.
+; Y is current scrolltextCharPos (index into scrolltext buffer)
+; (X is current index into the 256-entry line-functions table.)
+; On exit: A and Y can be changed.
+; X must be preserved.
+; memoryReaderOffset memory location must have been incremented by the number of bytes in the control code plus its arguments.
+; E.g. if this was a code which took one additional byte as its argument, memoryReaderOffset must be incremented by 2.
+; If it was a control code with no arguments, memoryReaderOffset should increment by 1. 
+
+\\ Mask out top bit of char code (remove the bit that indicates this is a special code)
+AND #&7F
+TAY
+; Load the address of the function that handles the special character control code, then JMP to it.
+LDA controlCodeFnTableLow,Y
+STA jmpToSpecialCharHandler + 1
+LDA controlCodeFnTableHigh,Y
+STA jmpToSpecialCharHandler + 2
+.jmpToSpecialCharHandler
+JMP &0000       \\ Each handler returns by calling RTS
+
+; CustomLineFX is a separate file which pulls in a number of files that were generated by the 'RasterGen' tool
+; and also provides some additional code and data. Essentially this contains the data that defines the set of all
+; unique 'line drawing' functions (functions that all take the same number of cycles and change the palette to
+; draw *one line* of a glyph), the per-glyph data that says, for each glyph, how many lines it contains and which
+; line drawing function to use for each line, along with other data and code to handle the control codes.
+include "effects/Scrolltext/CustomLineFX.6502"
+
+.scrolltextData
+; First we MAPCHAR for each possible scrolltext character. The order must match the CharsetXXX.txt file.
+MAPCHAR 'A',0
+MAPCHAR 'B',1
+MAPCHAR 'C',2
+MAPCHAR 'D',3
+MAPCHAR 'E',4
+MAPCHAR 'F',5
+MAPCHAR 'G',6
+MAPCHAR 'H',7
+MAPCHAR 'I',8
+MAPCHAR 'J',9
+MAPCHAR 'K',10
+MAPCHAR 'L',11
+MAPCHAR 'M',12
+MAPCHAR 'N',13
+MAPCHAR 'O',14
+MAPCHAR 'P',15
+MAPCHAR 'Q',16
+MAPCHAR 'R',17
+MAPCHAR 'S',18
+MAPCHAR 'T',19
+MAPCHAR 'U',20
+MAPCHAR 'V',21
+MAPCHAR 'W',22
+MAPCHAR 'X',23
+MAPCHAR 'Y',24
+MAPCHAR 'Z',25
+MAPCHAR '0',26
+MAPCHAR '1',27
+MAPCHAR '2',28
+MAPCHAR '3',29
+MAPCHAR '4',30
+MAPCHAR '5',31
+MAPCHAR '6',32
+MAPCHAR '7',33
+MAPCHAR '8',34
+MAPCHAR '9',35
+MAPCHAR '-',36
+MAPCHAR '.',37
+MAPCHAR '/',38
+MAPCHAR '!',39
+; map 2x to avoid screwy Emacs syntax highlighting.
+MAPCHAR '"',40
+MAPCHAR '"',40
+MAPCHAR '$',41
+MAPCHAR '%',42
+MAPCHAR '&',43
+MAPCHAR ':',44
+MAPCHAR ';',45
+; map 2x to avoid screwy VSCode syntax highlighting.
+MAPCHAR ''',46
+MAPCHAR ''',46
+MAPCHAR '(',47
+MAPCHAR ')',48
+MAPCHAR '=',49
+MAPCHAR '*',50
+MAPCHAR '+',51
+MAPCHAR '?',52
+MAPCHAR ',',53
+MAPCHAR '~',54			; triforce
+MAPCHAR '^',55			; heart
+MAPCHAR ' ',56			; added automatically by RasterGen
+
+; TODO This character mapping really needs to come out of RasterGen, so additional characters can be inserted easily.
+; Also the scrolltext 'text' itself could be an input to RasterGen which would strip out unused chars!
+
+; Note that processedGlyphCount below is 57 because the razor font defines 57 chars (including the 'empty' char that
+; the tool inserts by default). But for other fonts that would be different, hence the mapping above would be different.
+MAPCHAR 'a', 'g', processedGlyphCount   ; Control codes for 'change colour'
+
+; Lots of macros for inserting scrolltext control codes into a scrolltext bytestream.
+
+; Insert one byte into control stream. High bit will be set (indicating control code) and low 7 bits set to 'value'
+MACRO ControlCode codeIndex
+ASSERT codeIndex < &80
+EQUB (&80 OR codeIndex) 
+ENDMACRO
+
+MACRO ControlCode_1Arg codeIndex, value
+ControlCode codeIndex
+EQUB value
+ENDMACRO
+
+MACRO ControlCode_2Arg codeIndex, value1, value2
+ControlCode codeIndex
+EQUB value1
+EQUB value2
+ENDMACRO
+
+MACRO ControlCode_3Arg codeIndex, value1, value2, value3
+ControlCode codeIndex
+EQUB value1
+EQUB value2
+EQUB value3
+ENDMACRO
+
+MACRO ControlCode_4Arg codeIndex, value1, value2, value3, value4
+ControlCode codeIndex
+EQUB value1
+EQUB value2
+EQUB value3
+EQUB value4
+ENDMACRO
+
+MACRO ControlCode_5Arg codeIndex, value1, value2, value3, value4, value5
+ControlCode codeIndex
+EQUB value1
+EQUB value2
+EQUB value3
+EQUB value4
+EQUB value5
+ENDMACRO
+
+MACRO ControlCode_6Arg codeIndex, value1, value2, value3, value4, value5, value6
+ControlCode codeIndex
+EQUB value1
+EQUB value2
+EQUB value3
+EQUB value4
+EQUB value5
+EQUB value6
+ENDMACRO
+
+MACRO ControlCode_7Arg codeIndex, value1, value2, value3, value4, value5, value6, value7
+ControlCode codeIndex
+EQUB value1
+EQUB value2
+EQUB value3
+EQUB value4
+EQUB value5
+EQUB value6
+EQUB value7
+ENDMACRO
+
+MACRO ControlCode_8Arg codeIndex, value1, value2, value3, value4, value5, value6, value7, value8
+ControlCode codeIndex
+EQUB value1
+EQUB value2
+EQUB value3
+EQUB value4
+EQUB value5
+EQUB value6
+EQUB value7
+EQUB value8
+ENDMACRO
+
+MACRO ControlCode_BeginTask taskFnAddress, LoopStartValue, byteCount
+ASSERT byteCount <= taskBlockDataSize
+ControlCode_5Arg cc_beginTask, HI(taskFnAddress), LO(taskFnAddress), HI(LoopStartValue), LO(LoopStartValue), byteCount
+ENDMACRO
+
+MACRO ControlCode_BeginTaskAdd16BitValue targetAddressOnZP, framesToRun, valueToAdd
+{
+	ControlCode_BeginTask AddConstant_16, framesToRun, (argsEnd - argsBegin)     ; Begin a task whose fn is AddConstant_16, start task loop counter at LoopStartValue, and this task fn needs three bytes copied to the task block
+	.argsBegin
+	EQUB targetAddressOnZP
+	EQUB LO(valueToAdd)
+	EQUB HI(valueToAdd)
+	.argsEnd
+}
+ENDMACRO
+
+
+MACRO ControlCode_BeginTaskSwapBetween8BitValues targetAddressOnZP, framesToRun, periodicity, value1, value2
+{
+	ControlCode_BeginTask AlternateBetweenTwoValues_8, framesToRun, (argsEnd - argsBegin)
+	.argsBegin
+	EQUB targetAddressOnZP
+	EQUB periodicity		; Note that we specify periodicity twice to make the starting counter value the same as the
+	EQUB periodicity		; Period. If desired this could be upgraded so you can specify the counter start value for the first period
+	EQUB value1
+	EQUB value2
+	.argsEnd
+}
+ENDMACRO
+
+; These indices indicate what effect each control code (a scrolltex char with the high bit set) has.
+cc_scrolltextSpeed_2 = 0
+cc_xWibbleSpeed_2 = 1
+cc_yScale_2 = 2
+cc_setBank_1 = 3
+cc_beginTask = 4
+
+; In the final demo the last two of these were not actually used.
+.textBankAddressesHigh
+EQUB HI(scrolltext0)
+EQUB HI(scrolltext1)
+EQUB HI(scrolltext2)
+EQUB HI(scrolltext3)
+.textBankAddressesLow
+EQUB LO(scrolltext0)
+EQUB LO(scrolltext1)
+EQUB LO(scrolltext2)
+EQUB LO(scrolltext3)
+
+; This defines which scrolltext bank will be used the next time the Scrolltext effect is started.
+.textBankOnNextEntry
+EQUB 0
+
+MACRO SetNextScrolltext successorEffectIndex
+Timeline_SetAddressToValue_8bit textBankOnNextEntry, successorEffectIndex
+ENDMACRO
+
+; Finally we get down to the timelines that control the Scrolltext Effect!
+.timeline_scrolltext0
+; The first thing we do is say "next time the Scrolltext Effect start, use bank 1".
+TimelineEntryHeaderForFlag tc_waitType_immediate
+SetNextScrolltext 1
+
+; Set effect timeline (not the scrolltext bank, which is different) for the next time this effect is entered.
+; Could save a little bit of space (a few bytes) by putting the timeline addresses into one table of
+; two-byte (16 bit) values ... but not worth it unless space becomes incredibly tight.
+TimelineEntryHeaderForFlag tc_waitType_immediate
+Timeline_SetAddressToValue_8bit effectTimlineAddressTableHigh + fxIndex_Scrolltext, HI(timeline_scrolltext1)
+
+TimelineEntryHeaderForFlag tc_waitType_immediate
+Timeline_SetAddressToValue_8bit effectTimlineAddressTableLow + fxIndex_Scrolltext, LO(timeline_scrolltext1)
+
+; Wait for 1250 frames then jump to specified effect (sine wave wibbler).
+TimelineEntryHeader tc_waitType_sinceLastTimelinePoint, 1250
+TimelineFunction_1Arg tl_fnIndex_swapToEffect, fxIndex_ThinSine
+
+
+.timeline_scrolltext1
+; Very similar behaviour to the previous timeline, but we jump to a different effect (Blobs) at the end.
+TimelineEntryHeaderForFlag tc_waitType_immediate
+SetNextScrolltext 2
+
+TimelineEntryHeaderForFlag tc_waitType_immediate
+Timeline_SetAddressToValue_8bit effectTimlineAddressTableHigh + fxIndex_Scrolltext, HI(timeline_scrolltext2)
+
+TimelineEntryHeaderForFlag tc_waitType_immediate
+Timeline_SetAddressToValue_8bit effectTimlineAddressTableLow + fxIndex_Scrolltext, LO(timeline_scrolltext2)
+
+TimelineEntryHeader tc_waitType_sinceLastTimelinePoint, 700
+TimelineFunction_1Arg tl_fnIndex_swapToEffect, fxIndex_Blobs
+
+; This was never used
+.timeline_scrolltext2
+;TimelineEntryHeaderForFlag tc_waitType_immediate
+;SetNextScrolltext 3
+
+;TimelineEntryHeaderForFlag tc_waitType_immediate
+;Timeline_SetAddressToValue_8bit effectTimlineAddressTableHigh + fxIndex_Scrolltext, HI(timeline_scrolltext3)
+
+;TimelineEntryHeaderForFlag tc_waitType_immediate
+;Timeline_SetAddressToValue_8bit effectTimlineAddressTableLow + fxIndex_Scrolltext, LO(timeline_scrolltext3)
+
+TimelineEntryHeader tc_waitType_sinceLastTimelinePoint, 400
+TimelineFunction_1Arg tl_fnIndex_swapToEffect, fxIndex_Cheq
+
+;.timeline_scrolltext3
+;TimelineEntryHeader tc_waitType_sinceLastTimelinePoint, 1000
+;TimelineFunction_1Arg tl_fnIndex_swapToEffect, fxIndex_Cheq
+
+.scrolltext0
+ControlCode_2Arg cc_scrolltextSpeed_2, 8, 0
+ControlCode_2Arg cc_yScale_2, 0, 64
+ControlCode_2Arg cc_xWibbleSpeed_2, 0, 0
+EQUS "        .        .      .    .  . ... 3... 2... 1...    "
+ControlCode_2Arg cc_scrolltextSpeed_2, 6, 0
+;ControlCode_2Arg cc_xWibbleSpeed_2, 1, 0
+ControlCode_2Arg cc_yScale_2, 0, 127
+ControlCode_BeginTaskAdd16BitValue xWibbleSpeedLow, 5, 100
+
+EQUS "HELLO cNcOcVcAd2d0d1d9g!!!    "
+
+ControlCode_2Arg cc_yScale_2, 0, 96
+ControlCode_2Arg cc_xWibbleSpeed_2, 0, 64
+
+EQUS "g3 BIT aCeOcLdObUfRg. 2 MHZ g6502.     "
+
+ControlCode_2Arg cc_yScale_2, 0, 64
+ControlCode_2Arg cc_xWibbleSpeed_2, 5, 0
+ControlCode_2Arg cc_scrolltextSpeed_2, 7, 0
+EQUS "gCODE: aVaEaCaTaOaRaEaYaEaS g& cTcOcM cS.        "
+
+ControlCode_1Arg cc_setBank_1, 0
+.scrolltext0End
+
+.scrolltext1
+EQUS "  "
+ControlCode_2Arg cc_scrolltextSpeed_2, 5, 0
+ControlCode_2Arg cc_yScale_2, 0, 96
+ControlCode_2Arg cc_xWibbleSpeed_2, 0, 64
+EQUS "gGgRgAgPgHgIgCgSg: eDeEeTeHeMeUeNeKe.     "
+ControlCode_2Arg cc_scrolltextSpeed_2, 5, 0
+ControlCode_2Arg cc_yScale_2, 0, 220
+EQUS "gMUSIC PLAYER: fSfIfMfOfN fM.      "
+
+ControlCode_1Arg cc_setBank_1, 1
+.scrolltext1End
+
+.scrolltext2
+ControlCode_2Arg cc_scrolltextSpeed_2, 5, 0
+ControlCode_2Arg cc_yScale_2, 0, 220
+EQUS "MUSIC PLAYER AND CONVERSION: SIMON M.    "
+ControlCode_1Arg cc_setBank_1, 2
+.scrolltext2End
+
+.scrolltext3
+EQUS "  "
+ControlCode_2Arg cc_scrolltextSpeed_2, 4, 0
+ControlCode_2Arg cc_xWibbleSpeed_2, 7, 0
+ControlCode_2Arg cc_yScale_2, 0, 180
+EQUS "PLAYER OPTIMISATION: HEXWAB.      "
+ControlCode_1Arg cc_setBank_1, 3
+.scrolltext3End
+
+
+scrolltext0Length = scrolltext0End - scrolltext0
+scrolltext1Length = scrolltext1End - scrolltext1
+scrolltext2Length = scrolltext2End - scrolltext2
+
+PRINT "Scrolltext 0 length: ", scrolltext0Length
+PRINT "Scrolltext 1 length: ", scrolltext1Length
+PRINT "Scrolltext 2 length: ", scrolltext2Length
+
+.controlCodeFnTableLow
+EQUB LO(setScrollSpeed)
+EQUB LO(setXWibbleSpeed)
+EQUB LO(setYScale)
+EQUB LO(setTextBank)
+EQUB LO(beginTask)
+.controlCodeFnTableHigh
+EQUB HI(setScrollSpeed)
+EQUB HI(setXWibbleSpeed)
+EQUB HI(setYScale)
+EQUB HI(setTextBank)
+EQUB HI(beginTask)
+.controlcodeFnTableEnd
+
+\\ TODO: Most of these are basically identical except changing different addresses. Work out most efficient way
+\\ to refactor this into a generic "change an address to a value" function
+
+.ControlCodeFnsBegin
+
+.setScrollSpeed
+LDY memoryReaderOffset
+INY
+LDA (memoryReaderBasePtrAddress),Y
+STA scrolltextSpeedHigh
+INY
+LDA (memoryReaderBasePtrAddress),Y
+STA scrolltextSpeedLow
+INY
+STY memoryReaderOffset
+RTS
+
+.setXWibbleSpeed
+LDY memoryReaderOffset
+INY
+LDA (memoryReaderBasePtrAddress),Y
+STA xWibbleSpeedHigh
+INY
+LDA (memoryReaderBasePtrAddress),Y
+STA xWibbleSpeedLow
+INY
+STY memoryReaderOffset
+RTS
+
+.setYScale
+LDY memoryReaderOffset
+INY
+LDA (memoryReaderBasePtrAddress),Y
+STA yScaleFactorHigh
+INY
+LDA (memoryReaderBasePtrAddress),Y
+STA yScaleFactorLow
+INY
+STY memoryReaderOffset
+RTS
+
+\\ TODO This could become 'set memory reader base pointer address'
+.setTextBank
+\\ Load address from table of scrolltext banks, store into memoryReaderBasePtrAddress
+LDY memoryReaderOffset
+INY
+LDA (memoryReaderBasePtrAddress),Y
+\\ Now we have bank in A...
+\\ xfer to Y and use it to load addresses
+TAY
+LDA textBankAddressesHigh,Y
+STA memoryReaderBasePtrAddress + 1
+LDA textBankAddressesLow,Y
+STA memoryReaderBasePtrAddress
+
+\\ reset character pos to start of scrolltext. This means you can't jump in halfway through a bank.
+\\ If we ever need to do that, we can change this code relatively easily.
+LDY #0
+STY memoryReaderOffset
+RTS
+
+.ControlCodeFnsEnd
+
+.ScrollTextEffectSetup
+    LDA #10
+    LDA #1
+    STA yScaleFactorHigh
+    STA xWibbleSpeedHigh
+    STA scrolltextSpeedHigh
+    STA scrollTextCharLine
+    LDA #0
+    sta glyphInfo
+    STA yScaleFactorLow
+    STA xWibbleSpeedLow
+    STA scrolltextSpeedLow
+    STA scrollTextCharPos
+    STA scrollCharLineCount
+    STA sinWaveStartIndexHigh
+    STA sinWaveStartIndexLow
+    STA lineFunctionsStartIndexHigh
+    STA lineFunctionsStartIndexLow
+
+    LDY textBankOnNextEntry
+    LDA textBankAddressesHigh,Y
+    STA scrollTextAddressHigh
+    LDA textBankAddressesLow,Y
+    STA scrollTextAddressLow
+
+    LDA #mainColToWhite
+    STA textColour
+    STA startColour
+
+RTS
+.EndScrollTextEffectSetup

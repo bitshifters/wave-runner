@@ -1,0 +1,41 @@
+; These indices, when read from a timeline stream, indicate what to do for the next timeline point.
+; THIS MUST BE KEPT IN SYNC WITH the order of fn ptrs in the timeline fns table
+; (ie timelineFunctionsHigh and timelineFunctionsLow)
+tl_fnIndex_swapToEffect = 0
+tl_fnIndex_setTimelineBank = 1
+tl_fnIndex_spawnTask = 2
+tl_fnIndex_startDecrunch = 3
+tl_fnIndex_setZeroPageToValue_8bit = 4
+tl_fnIndex_setZeroPageToValue_16bit = 5
+tl_fnIndex_setAddressToValue_8bit = 6
+tl_fnIndex_setAddressToValue_16bit = 7
+tl_fnIndex_setAddressToValues_multiple = 8
+tl_fnIndex_setZPFlag = 9
+fl_fnIndex_doNothing = 10
+fl_fnIndex_setPaletteMode1 = 11
+fl_fnIndex_setPaletteMode2 = 12
+timelineFunctionCount = 13
+
+    waitableCountersWithArgumentTypeCount = 3
+    
+    tc_waitType_sinceDemoStart = 0
+    tc_waitType_sinceEffectStart = 1
+    tc_waitType_sinceLastTimelinePoint = 2
+    tc_waitType_decrunchDone = 3
+    tc_waitType_immediate = 4
+
+
+.timelineVars
+
+
+; The two variables below are coped to memoryStreamStuff when timelineProcessing starts, and back to here afterwards.
+
+.timelinePos SKIP 1   ; Where in current bank we are
+.timelineBankAddress SKIP 2  ; Which bank of the timeline are we on. 
+
+.timeSinceEffectStart SKIP 2
+.timeSinceLastChange SKIP 2
+
+.waitableCounterAddresses SKIP waitableCountersWithArgumentTypeCount
+
+.timelineVarsEnd

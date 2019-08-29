@@ -1,0 +1,66 @@
+Intro and Outro Image Sequence
+
+These are relatively simple effects, which showcase Dethmunk's artistic skills by displaying a sequence of images.
+
+There are essentially three types of transition used by these effects:
+
+- Palette-based: The palette changes from 'all colours black' to 'standard MODE2 colours' or vice versa. Instant transition from black->image or image->black.
+- Shadow/Main Display: Bit 0 of ACCCON is flipped to change from rendering the image in Shadow memory to the one in Main memory, or vice versa. Instant transition from one image to another.
+- Gradual fade from all lines rendering Main, to all lines rendering Shadow, or vice versa (see details below). This can do a gradual transition from one image to another, (or if one image is black you can transition to/from black).
+
+
+Demo Intro
+----------
+
+When the 'Intro Images' effect starts, the palette is all black. The first image ("Bitshifters presents") is decrunched into main RAM, and then a timeline event changes the palette to standard MODE2, thus displaying the image.
+
+The second image is then decrunched into shadow RAM, and after a few seconds, ACCCON bit 0 is flipped to instantly display the 'Wave Runner' logo.
+
+
+Demo Outro
+----------
+
+This effect is very similar to the Intro effect, with one additional feature: On each scanline, it reads a 256-entry table (whose values are all either 0 or 1, indicating 'render from shadow memory' or 'render from main memory', and uses that to set the appropriate bit in ACCCON.
+
+In fact the 'render' function is so simple that I can show the whole thing here!
+
+[code]
+.OutroRender
+{
+    ; Wait until near to the beginning of the visible frame.
+    JSR wait128
+    WAIT_40
+
+    ldy #0  ; Set up Y to count 256 lines. 
+
+    .loop
+    LDA lineShadowTable,Y   ; 4 .. load shadow/main state for this line (this is either 0 or 1)
+    TSB &FE34               ; 6 .. if bit 0 is set, set it in ACCON
+    EOR #%00000001          ; 2 .. invert bit 0
+    TRB &FE34               ; 6 .. and now it it's set (ie it was clear when loaded), clear it in ACCON
+
+    ; Wait so the loop takes 128 cycles
+    WAIT_35
+    WAIT_35
+    WAIT_35
+
+    ; Must be 123 cycles to here...
+    dey      ; 2 == 125
+    bne loop ; 3 == 128
+
+    ; Loop has finished, we're done rendering this frame!
+    JMP EffectRenderReturn
+}
+[/code]
+
+(Note the use of the 65C02-specific 'TSB' and 'TRB' opcodes! When you first hear about these you think they'll be incredibly useful... but then you realise that they only have 'absolute' addressing modes, so they're only really useful for flipping bits in memory-mapped registers.)
+
+The first 'Outro' image is displayed by unpacking it to main memory at the start of the effect while the palette is set to all-black, and then setting the palette so normal MODE2 as soon as the decrunch is finished. This means there's a period of black screen between the end of the 'Chequerboard' effect and the image being displayed. Annoyingly, I've realised literally as I'm writing this that we could have easily avoided this delay -- it would have taken 5 minutes to implement -- but I didn't think of it at the time!
+
+The 'random line-by-line fade to next image' is implemented by decrunching the final 'Goodbye' image to shadow memory, and then kicking off a task that copies the value '1' (meaning 'render from shadow for this line') into the 256-entry table that specifies main/shadow render state for each scanline. This copies one value per frame, which means the fade takes around 5 seconds to complete.
+
+The final fade back to black is done by decrunching an entirely black screen to main RAM (overwriting the flying flaming Acorn image) and then kicking off another random line-by-line copy to set the state back to 'Render from Main memory' ...
+
+... except that there's a bug, and instead of transitioning to a black screen, it randomly transitions the lines from 'main' to 'shadow' continually. So the 'Goodbye' image continues to fade in and out instead of disappearing. I decided that this actually looked pretty good (and people would think it was deliberate) so we left it as-is instead of trying to debug it!
+
+

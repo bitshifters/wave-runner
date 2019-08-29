@@ -1,0 +1,29 @@
+diagonalPattern = 0
+ditherPattern = 1
+
+defaultPattern = ditherPattern
+;defaultPattern = diagonalPattern
+
+IF defaultPattern = diagonalPattern
+
+mainColToBlack    = col5ToBlack
+mainColToBlue     = col5ToBlue
+mainColToRed      = col5ToRed
+mainColToMagenta  = col5ToMagenta
+mainColToGreen    = col5ToGreen
+mainColToYellow   = col5ToYellow
+mainColToCyan     = col5ToCyan
+mainColToWhite    = col5ToWhite
+
+ELIF defaultPattern = ditherPattern
+
+mainColToBlack    = colFToBlack
+mainColToBlue     = colFToBlue
+mainColToRed      = colFToRed
+mainColToMagenta  = colFToMagenta
+mainColToGreen    = colFToGreen
+mainColToYellow   = colFToYellow
+mainColToCyan     = colFToCyan
+mainColToWhite    = colFToWhite
+
+ENDIF

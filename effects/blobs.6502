@@ -1,0 +1,947 @@
+; blobs
+;
+; moveToEffect EffectDeclaration
+
+include "intermediate/blobs_tables.6502"
+
+{
+
+text_base=$2000
+init_crtc_base=$3000 div 8
+
+next_colour=effectVariables+0 ; 1
+seed=effectVariables+1		  ; 1
+delay=effectVariables+2		  ; 1
+; marble_run_index=effectVariables+3 ; 1
+running=effectVariables+4		; 1
+init_row=effectVariables+5		; 1
+init_counter=effectVariables+6	; 1
+fg_col=effectVariables+7		; 1
+bg_col=effectVariables+8		; 1
+text_ptr=effectVariables+9		; 2
+mode_counter=effectVariables+11	; 1
+dest_ptr=effectVariables+12		; 1
+mode=effectVariables+13			; 1
+scroll_flags=effectVariables+14	; 1
+transition_value=effectVariables+15 ; 1
+
+align 256
+.crtc_bases_hi:skip 8
+.crtc_bases_lo:skip 8
+.frames:skip 8
+.dframes:skip 8
+.columns_data
+.column0s:equb 7,7,7,7,7,7,7,7
+.column1s:equb 7,7,7,7,7,7,7,7
+.column2s:equb 7,7,7,7,7,7,7,7
+.column3s:equb 7,7,7,7,7,7,7,7
+.column4s:equb 7,7,7,7,7,7,7,7
+.column5s:equb 7,7,7,7,7,7,7,7
+.column6s:equb 7,7,7,7,7,7,7,7
+.column7s:equb 7,7,7,7,7,7,7,7
+.column8s:equb 7,7,7,7,7,7,7,7
+.column9s:equb 7,7,7,7,7,7,7,7
+.row_r8s:for i,0,31:equb $30:next
+
+stride=(90*8*4) div 8
+
+.frame_offsets_lo
+equb lo(0*stride)
+equb lo(1*stride)
+equb lo(2*stride)
+equb lo(3*stride)
+equb lo(4*stride)
+equb lo(5*stride)
+equb lo(6*stride)
+
+.frame_offsets_hi
+equb hi(0*stride)
+equb hi(1*stride)
+equb hi(2*stride)
+equb hi(3*stride)
+equb hi(4*stride)
+equb hi(5*stride)
+equb hi(6*stride)
+
+.row_masks:skip 8
+.row_column_counts:skip 8
+
+; .marble_run_colours:equb 1,3,255
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+nublobs=TRUE
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+if nublobs
+
+; .update_marble_run
+; {
+; ldx #0:jsr scroll_right
+; inx:jsr scroll_left
+; inx:jsr scroll_right
+; inx:jsr scroll_left
+; inx:jsr scroll_right
+; inx:jsr scroll_left
+; inx:jsr scroll_right
+; inx:jsr scroll_left
+; rts
+; }
+
+; scroll_left, scroll_right
+;
+; entry:
+; X=row to scroll
+; Y=value to put on left/right when the row has to be scrolled
+;
+; exit:
+; C=0 set if hardware scrolling was enough; Y preserved
+; C=1 set if the row data had to be scrolled; Y=value that fell off
+;
+; preserves: X
+
+.scroll_left
+{
+lda crtc_bases_lo,x
+inc a
+cmp #9
+bcs scroll_data_left
+sta crtc_bases_lo,x
+rts
+}
+
+.scroll_data_left
+{
+lda column0s,x:sta lda_off_blob+1
+lda column1s,x:sta column0s,x
+lda column2s,x:sta column1s,x
+lda column3s,x:sta column2s,x
+lda column4s,x:sta column3s,x
+lda column5s,x:sta column4s,x
+lda column6s,x:sta column5s,x
+lda column7s,x:sta column6s,x
+lda column8s,x:sta column7s,x
+lda column9s,x:sta column8s,x
+tya:and #$0f:sta column9s,x
+.lda_off_blob:ldy #$ff
+stz crtc_bases_lo,x
+rts
+}
+
+.scroll_right
+{
+dec crtc_bases_lo,x
+bmi data
+clc
+rts
+.data
+lda #8:sta crtc_bases_lo,x
+;fall through
+}
+
+.scroll_data_right
+{
+lda column9s,x:sta lda_off_blob+1
+lda column8s,x:sta column9s,x
+lda column7s,x:sta column8s,x
+lda column6s,x:sta column7s,x
+lda column5s,x:sta column6s,x
+lda column4s,x:sta column5s,x
+lda column3s,x:sta column4s,x
+lda column2s,x:sta column3s,x
+lda column1s,x:sta column2s,x
+lda column0s,x:sta column1s,x
+tya:and #$0f:sta column0s,x
+.lda_off_blob:ldy #$ff
+sec
+rts
+}
+
+.blob_block
+{
+
+; Character row 0
+
+; scanline 0 (blank)
+
+; +8 from ldx#/jsr
+
+lda #$04:sta $fe00:lda #$03:sta $fe01 ; +16 = 24
+lda #$07:eor column0s,x:sta $fe21 ; +10=34
+lda #$17:eor column1s,x:sta $fe21 ; +10=44
+lda #$27:eor column2s,x:sta $fe21 ; +10=54
+lda #$37:eor column3s,x:sta $fe21 ; +10=64
+nop								  ; +2=66
+nop								  ; +2=68
+lda #$08:sta $fe00				  ; +8=76
+lda #$30:sta $fe01				  ; +8=84
+lda #$47:eor column4s,x:sta $fe21 ; +10=94
+lda #$57:eor column5s,x:sta $fe21 ; +10=104
+stz $fe01						  ; +6=110
+lda #$67:eor column6s,x:sta $fe21 ; +10=120
+lda #$77:eor column7s,x:sta $fe21 ; +10=128,+2
+
+; scanline 1
+;
+; crtc_bases_XX+1 - +1, because setting up for the next block.
+;
+; The last part will direct the CRTC to display junk, but it's
+; hidden...
+
+; +2 from above
+lda #$87:eor column8s,x:sta $fe21	  ; +10=12
+lda #$97:eor column9s,x:sta $fe21	  ; +10=22
+ldy frames+1,x						  ; +4=26
+clc									  ; +2=28
+lda #13								  ; +2=30
+sta $fe00							  ; +6=36
+lda crtc_bases_lo+1,x				  ; +4=40
+adc frame_offsets_lo,y				  ; +4=44
+sta $fe01							  ; +6=50
+lda crtc_bases_hi+1,x				  ; +4=54
+adc frame_offsets_hi,y				  ; +4=58
+nop									  ; +2=60
+nop									  ; +2=62
+nop									  ; +2=64
+nop									  ; +2=66
+nop									  ; +2=68
+ldy #$08:sty $fe00					  ; +8=76
+ldy #$30:sty $fe01					  ; +8=84
+ldy #12:sty $fe00					  ; +8=92
+sta $fe01							  ; +6=98
+lda #8:sta $fe00					  ; +8=106
+stz $fe01							  ; +6=112
+jsr wait12							  ; +12=124
+nop:nop								  ; +4=128
+
+; scanlines 2-6
+jsr do_block_scanline_n			; 2
+jsr do_block_scanline_n			; 3
+jsr do_block_scanline_n			; 4
+jsr do_block_scanline_n			; 5
+jsr do_block_scanline_n			; 6
+jsr do_block_scanline_n			; 7
+
+; Character row 1
+jsr do_block_scanline_n			; 0
+jsr do_block_scanline_n			; 1
+jsr do_block_scanline_n			; 2
+jsr do_block_scanline_n			; 3
+jsr do_block_scanline_n			; 4
+jsr do_block_scanline_n			; 5
+jsr do_block_scanline_n			; 6
+jsr do_block_scanline_n			; 7
+
+; Character row 2
+jsr do_block_scanline_n			; 0
+jsr do_block_scanline_n			; 1
+jsr do_block_scanline_n			; 2
+jsr do_block_scanline_n			; 3
+jsr do_block_scanline_n			; 4
+jsr do_block_scanline_n			; 5
+jsr do_block_scanline_n			; 6
+jsr do_block_scanline_n			; 7
+
+; Character row 3
+jsr do_block_scanline_n			; 0
+jsr do_block_scanline_n			; 1
+jsr do_block_scanline_n			; 2
+jsr do_block_scanline_n			; 3
+jsr do_block_scanline_n			; 4
+jsr do_block_scanline_n			; 5
+jsr do_block_scanline_n			; 6
+
+; Two options for last scanline of last row...
+
+jsr wait56						; +56=56
+; A=0 if last scanline, A=$ff otherwise
+cpx #7:lda #0:adc #$ff			; +6=62
+nop:nop:nop						; +6=68
+ldy #$08:sty $fe00				; +8=76
+ldy #$30:sty $fe01				; +8=84
+ldy #$06:sty $fe00				; +8=92
+sta $fe01						; +6=98
+lda #$08:sta $fe00				; +8=106
+stz $fe01						; +6=112
+nop:nop:nop:nop:nop				; +10=122
+rts								; +6=128
+
+.do_block_scanline_n			; 0+6(jsr)=6 when entered here
+jsr wait56						; +56=62
+nop:nop:nop						; +6=68
+lda #$08:sta $fe00				; +8=76
+lda #$30:sta $fe01				; +8=84
+jsr wait32						; +32=116
+stz $fe01						; +6=122
+rts								; +6=128
+}
+rts
+
+.*BlobsRender
+{
+.*BlobsRender_jsr:jsr blobs_render_transition
+jmp EffectRenderReturn
+}
+
+.blobs_render_blobs
+{
+;+6=6
+jsr wait128						; +128=134
+lda #1:sta $fe00				; +8=142
+lda #90:sta $fe01				; +8=150
+jsr wait16						; +16=166
+
+lda #7:sta $fe00:lda #255:sta $fe01 ; 
+lda #6:sta $fe00:lda #255:sta $fe01 ; +32=198
+
+ldx #0:jsr blob_block
+ldx #1:jsr blob_block
+ldx #2:jsr blob_block
+ldx #3:jsr blob_block
+ldx #4:jsr blob_block
+ldx #5:jsr blob_block
+ldx #6:jsr blob_block
+ldx #7:jsr blob_block
+
+; another 7 rows to complete the full set of 39, with vsync on the
+; 34th.
+lda #4:sta $fe00:lda #6:sta $fe01 ; vertical total
+lda #6:sta $fe00:lda #0:sta $fe01 ; vertical displayed
+lda #7:sta $fe00:lda #3:sta $fe01 ; vsync position
+}
+rts
+
+.blobs_render_transition
+{
+;+6=6
+lda #1:sta $fe00				; +8=14
+lda #81:sta $fe01				; +8=22
+jsr wait80						; +80=102
+; nop:nop							; +4=106
+ldx #0							; 106+2=108
+
+lda #12:sta $fe00:lda #hi(($8000-640)>>3):sta $fe01
+lda #13:sta $fe00:lda #lo(($8000-640)>>3):sta $fe01 ; +32=140
+
+lda #7:sta $fe00:lda #255:sta $fe01
+lda #6:sta $fe00:lda #255:sta $fe01 ; +32=172
+
+ldx #0:jsr transition_row
+ldx #1:jsr transition_row
+ldx #2:jsr transition_row
+ldx #3:jsr transition_row
+ldx #4:jsr transition_row
+ldx #5:jsr transition_row
+ldx #6:jsr transition_row
+ldx #7:jsr transition_row
+ldx #8:jsr transition_row
+ldx #9:jsr transition_row
+ldx #10:jsr transition_row
+ldx #11:jsr transition_row
+ldx #12:jsr transition_row
+ldx #13:jsr transition_row
+ldx #14:jsr transition_row
+ldx #15:jsr transition_row
+ldx #16:jsr transition_row
+ldx #17:jsr transition_row
+ldx #18:jsr transition_row
+ldx #19:jsr transition_row
+ldx #20:jsr transition_row
+ldx #21:jsr transition_row
+ldx #22:jsr transition_row
+ldx #23:jsr transition_row
+ldx #24:jsr transition_row
+ldx #25:jsr transition_row
+ldx #26:jsr transition_row
+ldx #27:jsr transition_row
+ldx #28:jsr transition_row
+ldx #29:jsr transition_row
+ldx #30:jsr transition_row
+ldx #31:jsr transition_row
+
+jsr wait32						; finish final scanline
+
+; another 7 rows to complete the full set of 39, with vsync on the
+; 34th.
+lda #4:sta $fe00:lda #6:sta $fe01 ; vertical total
+lda #6:sta $fe00:lda #0:sta $fe01 ; vertical displayed
+lda #7:sta $fe00:lda #3:sta $fe01 ; vsync position
+
+rts
+}
+
+.transition_row
+;+8 to here
+lda #8:sta $fe00				; +8=16
+lda row_r8s,x:sta $fe01			; +10=26
+lda #4:sta $fe00				; +8=34
+stz $fe01						; +6=40
+jsr wait80:nop:nop:nop:nop		; +88=128
+jsr wait128						; #1
+jsr wait128						; #2
+jsr wait128						; #3
+jsr wait128						; #4
+jsr wait128						; #5
+jsr wait128						; #6
+jsr wait116						; #7 +116=116
+nop:nop:nop						; +6=122
+rts								; +6=128
+
+else
+
+; .*BlobsRender
+; {
+; lda #7:sta $fe00:lda #255:sta $fe01 ; 0 +16 = 16
+; lda #6:sta $fe00:lda #255:sta $fe01	; 16 +16 = 32
+; nop								; 32 +4 = 36
+; ldx #0								; 36 +2 = 38
+; .loop
+; lda #4:sta $fe00:lda #3:sta $fe01 ; 0 +16 = 16
+
+; nop:nop:nop:nop
+; nop:nop:nop:nop
+; nop:nop:nop:nop
+; nop:nop:nop:nop
+; nop:nop:nop:nop
+; nop:nop
+
+; lda #$04:sta $fe21					; 60 +6 = 66
+; lda #8:sta $fe00					; 66 +8 = 74
+; lda #$30:sta $fe01					; 74 +8 = 82
+
+; nop
+; nop:nop:nop:nop
+; nop:nop:nop:nop
+; nop:nop
+
+; stz $fe01						; 102 +6 = 118
+; nop:nop:nop					; 108 +8 = 116
+
+; nop:nop:nop:equb 3				; 116 +7 = 123
+; inx:bne loop					; 123 +5 = 128
+
+; ; another 7 rows to complete the full set of 39, with vsync on the
+; ; 34th.
+; lda #4:sta $fe00:lda #6:sta $fe01 ; vertical total
+; lda #6:sta $fe00:lda #0:sta $fe01 ; vertical displayed
+; lda #7:sta $fe00:lda #3:sta $fe01 ; vsync position
+; }
+; jmp EffectRenderReturn
+
+endif
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+; for i,0,7
+; {
+; ldy #7
+; lda (row0_ptr+i*2)
+; and row0_mask+i
+; beq z
+; ldy #0
+; .z
+; ldx #i
+; jsr scroll_left
+; bcc row_ok
+; lsr row0_mask+i
+; bcc row_ok
+; ror row0_mask+i					; mask=$80, C=0
+; lda row0_ptr+i*2+0
+; adc #8
+; sta row0_ptr+i*2+0
+; bcc row_ok
+; inc row0_ptr+i*2+1
+; .row_ok
+; }
+; next
+
+; A = scroll text byte.
+MACRO BlobsScrollRowUpdate index,lda_addr
+ldy bg_col						; assume background
+ldx row_column_counts+index
+beq got_pixel					; taken if no more scroll text
+and row_masks+index
+beq got_pixel
+ldy fg_col
+.got_pixel
+ldx #index
+jsr scroll_left
+bcc scrolled
+lsr row_masks+index
+bcc scrolled
+dec row_column_counts+index
+ror row_masks+index				; row mask=$80, C=0
+lda lda_addr+1
+adc #8
+sta lda_addr+1
+bcc scrolled
+inc lda_addr+2
+.scrolled
+ENDMACRO
+
+.mode_routines
+mode_scroll_text=P%-mode_routines:equw run_mode_scroll_text
+mode_scroll_9x=P%-mode_routines:equw run_mode_scroll_9x
+mode_wait=P%-mode_routines:equw run_mode_wait
+mode_transition=P%-mode_routines:equw run_mode_transition
+
+.*BlobsUpdate
+{
+bit running
+bpl run_done
+
+.*BlobsUpdate_command_done
+ldx mode
+bpl run_mode
+
+lda (text_ptr):{inc text_ptr+0:bne k:inc text_ptr+1:.k}
+tax
+jmp (blobs_command_routines,x)
+
+.run_mode
+jmp (mode_routines,x)
+.*BlobsUpdate_mode_done
+
+; update frames
+ldx #7
+.update_frames_loop
+clc
+lda frames,x
+adc dframes,x
+sta frames,x
+bmi frame_hit_min
+cmp #7
+bcs frame_hit_max
+.update_next_frame
+dex
+bpl update_frames_loop
+
+.run_done
+; prepare CRTC for first part.
+ldy frames+0
+clc
+lda #13:sta $fe00
+lda crtc_bases_lo+0:adc frame_offsets_lo,y:sta $fe01
+lda #12:sta $fe00
+lda crtc_bases_hi+0:adc frame_offsets_hi,y:sta $fe01
+jmp EffectUpdateReturn
+
+; ; prepare for first part.
+; ldy frames+0
+; clc
+; lda #13:sta $fe00
+; lda crtc_bases_lo+0:adc frame_offsets_lo,y:sta $fe01
+; lda #12:sta $fe00
+; lda crtc_bases_hi+0:adc frame_offsets_hi,y:sta $fe01
+; jmp EffectUpdateReturn
+
+.frame_hit_min
+stz frames,x
+bra update_next_frame
+;bra toggle_dframe
+
+.frame_hit_max
+lda #6
+sta frames,x
+bra update_next_frame
+.toggle_dframe
+lda dframes,x
+eor #$ff
+inc a
+sta dframes,x
+bra update_next_frame
+}
+
+.run_mode_scroll_text
+{
+.*BlobsUpdate_lda_row0:lda $ffff:BlobsScrollRowUpdate 0,BlobsUpdate_lda_row0
+.*BlobsUpdate_lda_row1:lda $ffff:BlobsScrollRowUpdate 1,BlobsUpdate_lda_row1
+.*BlobsUpdate_lda_row2:lda $ffff:BlobsScrollRowUpdate 2,BlobsUpdate_lda_row2
+.*BlobsUpdate_lda_row3:lda $ffff:BlobsScrollRowUpdate 3,BlobsUpdate_lda_row3
+.*BlobsUpdate_lda_row4:lda $ffff:BlobsScrollRowUpdate 4,BlobsUpdate_lda_row4
+.*BlobsUpdate_lda_row5:lda $ffff:BlobsScrollRowUpdate 5,BlobsUpdate_lda_row5
+.*BlobsUpdate_lda_row6:lda $ffff:BlobsScrollRowUpdate 6,BlobsUpdate_lda_row6
+.*BlobsUpdate_lda_row7:lda $ffff:BlobsScrollRowUpdate 7,BlobsUpdate_lda_row7
+assert BlobsUpdate_lda_row1-BlobsUpdate_lda_row0<256 ; and you'd hope not
+assert BlobsUpdate_lda_row2-BlobsUpdate_lda_row1=BlobsUpdate_lda_row1-BlobsUpdate_lda_row0
+assert BlobsUpdate_lda_row3-BlobsUpdate_lda_row2=BlobsUpdate_lda_row1-BlobsUpdate_lda_row0
+assert BlobsUpdate_lda_row4-BlobsUpdate_lda_row3=BlobsUpdate_lda_row1-BlobsUpdate_lda_row0
+assert BlobsUpdate_lda_row5-BlobsUpdate_lda_row4=BlobsUpdate_lda_row1-BlobsUpdate_lda_row0
+assert BlobsUpdate_lda_row6-BlobsUpdate_lda_row5=BlobsUpdate_lda_row1-BlobsUpdate_lda_row0
+assert BlobsUpdate_lda_row7-BlobsUpdate_lda_row6=BlobsUpdate_lda_row1-BlobsUpdate_lda_row0
+assert P%-BlobsUpdate_lda_row7=BlobsUpdate_lda_row1-BlobsUpdate_lda_row0
+
+lda row_column_counts+0
+ora row_column_counts+1
+ora row_column_counts+2
+ora row_column_counts+3
+ora row_column_counts+4
+ora row_column_counts+5
+ora row_column_counts+6
+ora row_column_counts+7
+.*mode_done_if_zero
+bne done
+
+; scroll is complete.
+lda #$ff:sta mode
+
+.done
+jmp BlobsUpdate_mode_done
+}
+
+.run_mode_scroll_9x
+{
+ldx #7
+lda scroll_flags:pha
+.scroll_loop
+ldy bg_col
+lsr scroll_flags
+bcs right
+.left:jsr scroll_left:bra next
+.right:jsr scroll_right
+.next
+dex:bpl scroll_loop
+pla:sta scroll_flags
+.*run_mode_wait
+dec mode_counter
+bra mode_done_if_zero
+}
+
+.run_mode_transition
+{
+ldx mode_counter
+lda transition_value
+sta row_r8s,x
+inx
+stx mode_counter
+cpx #32
+bcc done
+
+lda #$ff:sta mode
+
+.done
+jmp BlobsUpdate_mode_done
+
+}
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+.*BlobsPrepare
+{
+jsr ZeroEffectWorkspace
+
+; mode 2, standard palette
+lda #$14:sta $fe20
+clc:lda #$00:.set_palette_loop:eor #$07:sta $fe21:eor #$07:adc #$11:bcc set_palette_loop
+
+ldx #7
+.init_crtc_bases_loop
+lda #LO(init_crtc_base):sta crtc_bases_lo,x
+lda #HI(init_crtc_base):sta crtc_bases_hi,x
+dex:bpl init_crtc_bases_loop
+
+; {
+; lda #7
+; sta init_row
+; .scroll_row
+; lda init_row
+; sta init_counter
+; .loop
+; ldx init_row
+; ldy #7
+; jsr scroll_left
+; dec init_counter
+; bne loop
+; dec init_row
+; bne scroll_row
+; }
+
+; lda #$00:sta BlobsUpdate_lda_row0+1
+; lda #$01:sta BlobsUpdate_lda_row1+1
+; lda #$02:sta BlobsUpdate_lda_row2+1
+; lda #$03:sta BlobsUpdate_lda_row3+1
+; lda #$04:sta BlobsUpdate_lda_row4+1
+; lda #$05:sta BlobsUpdate_lda_row5+1
+; lda #$06:sta BlobsUpdate_lda_row6+1
+; lda #$07:sta BlobsUpdate_lda_row7+1
+
+; lda #$20
+; sta BlobsUpdate_lda_row0+2
+; sta BlobsUpdate_lda_row1+2
+; sta BlobsUpdate_lda_row2+2
+; sta BlobsUpdate_lda_row3+2
+; sta BlobsUpdate_lda_row4+2
+; sta BlobsUpdate_lda_row5+2
+; sta BlobsUpdate_lda_row6+2
+; sta BlobsUpdate_lda_row7+2
+
+lda #7:sta bg_col
+lda #0:sta fg_col
+lda #$ff:sta mode
+lda #lo(text_base):sta text_ptr+0
+lda #hi(text_base):sta text_ptr+1
+}
+rts
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+.*BlobsCleanup
+{
+}
+rts
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+.blobs_data:incbin "intermediate/blobs.exo"
+
+; http://codebase64.org/doku.php?id=base:small_fast_8-bit_prng
+.rand
+{
+lda seed
+beq doEor	
+asl a
+beq noEor ;if the input was $80, skip the EOR
+bcc noEor
+.doEor:eor #$1d
+.noEor:sta seed
+rts
+}
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+; Blobs text command routines
+
+.*blobs_regular
+{
+ldx #7
+.loop
+lda #lo(init_crtc_base):sta crtc_bases_lo,x
+lda #hi(init_crtc_base):sta crtc_bases_hi,x
+dex:bpl loop
+jmp BlobsUpdate_command_done
+}
+
+.*blobs_italics
+{
+ldx #7
+.loop
+clc
+txa:adc #lo(init_crtc_base):sta crtc_bases_lo,x
+lda #0:adc #hi(init_crtc_base):sta crtc_bases_hi,x
+dex:bpl loop
+jmp BlobsUpdate_command_done
+}
+
+.*blobs_on
+{
+lda #1:jsr init_dframes
+.*blobs_on_or_off_wait
+lda #7:sta mode_counter
+lda #mode_wait:sta mode
+jmp BlobsUpdate_command_done
+}
+
+.*blobs_off
+{
+lda #$ff:jsr init_dframes
+bra blobs_on_or_off_wait
+}
+
+.*blobs_on_instant
+{
+lda #0:jsr init_dframes
+lda #6:jsr init_frames
+jmp BlobsUpdate_command_done
+}
+
+.*blobs_off_instant
+{
+lda #0:jsr init_dframes
+lda #0:jsr init_frames
+jmp BlobsUpdate_command_done
+}
+
+.init_dframes
+{
+ldx #7
+.loop
+sta dframes,x
+dex:bpl loop
+rts
+}
+
+.init_frames
+{
+ldx #7
+.loop
+sta frames,x
+dex:bpl loop
+rts
+}
+
+.*blobs_set_pic
+{
+lda (text_ptr)
+ldx #7
+.init_crtc_bases_lo_loop
+sta crtc_bases_lo,x
+dex:bpl init_crtc_bases_lo_loop
+
+cmd_size=9*8
+ldy #cmd_size
+.init_columns_data_loop
+lda (text_ptr),y
+sta columns_data-1,y
+dey
+bne init_columns_data_loop
+clc
+lda text_ptr+0:adc #cmd_size+1:sta text_ptr+0
+bcc done
+inc text_ptr+1
+.done
+jmp BlobsUpdate_command_done
+}
+
+.*blobs_do_scroll_text
+{
+lda (text_ptr):tay
+ldx #7
+.init_columns_loop
+tya:sta row_column_counts,x
+lda #$80:sta row_masks,x
+dex:bpl init_columns_loop
+
+lda #lo(BlobsUpdate_lda_row0+1):sta dest_ptr+0
+lda #hi(BlobsUpdate_lda_row0+1):sta dest_ptr+1
+ldx #0+3
+ldy #0
+.update_addrs_loop
+clc
+txa:adc text_ptr:sta (dest_ptr),y:iny
+lda text_ptr+1:adc #0:sta (dest_ptr),y
+inx
+cpx #8+3
+beq done
+clc
+tya
+; -1 because Y=1...
+adc #BlobsUpdate_lda_row1-BlobsUpdate_lda_row0-1
+tay
+bcc update_addrs_loop
+inc dest_ptr+1
+bra update_addrs_loop
+.done
+ldy #1
+lda (text_ptr),y:tax:iny
+lda (text_ptr),y:sta text_ptr+1:stx text_ptr+0
+lda #mode_scroll_text:sta mode
+jmp BlobsUpdate_command_done
+}
+
+.*blobs_restart
+{
+lda #lo(text_base):sta text_ptr+0
+lda #hi(text_base):sta text_ptr+1
+jmp BlobsUpdate_command_done
+}
+
+.*blobs_scroll_9x
+{
+lda (text_ptr):sta scroll_flags
+{inc text_ptr+0:bne k:inc text_ptr+1:.k}
+lda #mode_scroll_9x:sta mode
+lda #9*9:sta mode_counter
+jmp BlobsUpdate_command_done
+}
+
+.*blobs_wait
+{
+lda (text_ptr):sta mode_counter
+{inc text_ptr+0:bne k:inc text_ptr+1:.k}
+lda #mode_wait:sta mode
+jmp BlobsUpdate_command_done
+}
+
+.*blobs_cls
+{
+lda bg_col
+ldx #9*8-1
+.loop
+sta columns_data,x
+dex:bpl loop
+jmp BlobsUpdate_command_done
+}
+
+.*blobs_transition_on
+{
+lda #$00
+jsr init_transition
+jmp BlobsUpdate_command_done
+}
+
+.*blobs_transition_off
+{
+lda #$30
+jsr init_transition
+jmp BlobsUpdate_command_done
+}
+
+.init_transition
+{
+sta transition_value
+eor #$30
+ldx #31
+.init_row_r8s_loop
+sta row_r8s,x
+dex:bpl init_row_r8s_loop
+
+lda #$00
+clc
+.init_palette_loop
+sta $fe21
+adc #$10:bcc init_palette_loop
+
+lda #mode_transition:sta mode
+
+stz mode_counter
+
+lda #lo(blobs_render_transition):sta BlobsRender_jsr+1
+lda #hi(blobs_render_transition):sta BlobsRender_jsr+2
+
+rts
+}
+
+.*blobs_blobs_mode
+{
+lda #lo(blobs_render_blobs):sta BlobsRender_jsr+1
+lda #hi(blobs_render_blobs):sta BlobsRender_jsr+2
+
+jmp BlobsUpdate_command_done
+}
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+; Test timeline for Blobs that waits for a while then jumps to next effect
+.*blobsTimeline
+TimelineEntryHeader tc_waitType_sinceLastTimelinePoint, 1
+Timeline_BeginDecrunch blobs_data,SLOT_BLOBS
+
+; decrunch time = 0xb8
+TimelineEntryHeader tc_waitType_sinceLastTimelinePoint, 256
+Timeline_SetZPValue running, $ff
+
+TimelineEntryHeader tc_waitType_sinceLastTimelinePoint, blobs_anim_num_frames
+; Can't get transition from Blobs to Scrolltext working. Need to reset CRTC properly again?
+;TimelineFunction_1Arg tl_fnIndex_swapToEffect, fxIndex_Scrolltext
+;TimelineFunction_1Arg tl_fnIndex_swapToEffect, fxIndex_Scrolltext
+TimelineFunction_1Arg tl_fnIndex_swapToEffect, fxIndex_Cheq
+}

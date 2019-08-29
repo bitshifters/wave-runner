@@ -1,0 +1,194 @@
+AUTO
+*TV0,1
+*FX16
+MODE 1
+COLOUR131:COLOUR0:CLS
+xtmp=&FA:ytmp=&FB
+code%=&900
+irq1v=&204
+FOR I%=0 TO2 STEP2
+P%=code%
+[OPT I%
+.sync
+php
+sei
+lda #2
+.vsync1
+bit &FE4D
+beq vsync1 \ wait for vsync
+\now we're within 10 cycles of vsync having hit
+
+
+\delay just less than one frame
+.syncloop
+sta &FE4D \ 4(stretched), ack vsync
+
+\{ this takes (5*ycount+2+4)*xcount cycles
+\x=55,y=142 -> 39902 cycles. one frame=39936
+ldx #142 \2
+.deloop
+ldy #55 \2
+.innerloop
+dey \2
+bne innerloop \3
+\ =152
+dex \ 2
+bne deloop \3
+\}
+
+nop:nop:nop:nop:nop:nop:nop:nop:nop \ +16
+bit &FE4D \4(stretched)
+bne syncloop \ +3
+\ 4+39902+16+4+3+3 = 39932
+\ ne means vsync has hit
+\ loop until it hasn't hit
+
+\now we're synced to vsync
+\delay to start of frame
+ldx #246
+.deloop2
+nop:nop:nop:nop:nop
+dex
+bne deloop2
+nop:nop:nop:nop:nop:nop
+plp
+rts
+
+.start
+sei
+lda irq1v
+sta notours+1
+lda irq1v+1
+sta notours+2
+lda #ourirq1v MOD256
+sta irq1v
+lda #ourirq1v DIV256
+sta irq1v+1
+
+jsr sync
+
+\ set up timer1
+lda #&FE
+sta &FE64 \ uservia T1L
+lda #&4D
+sta &FE65 \ uservia T1H
+
+\ enable uservia timer1
+lda &FE6E
+ora #&40
+sta &FE6E
+\ timer1 continuous interrupts
+lda #&40
+sta &FE6B
+
+\reset sysvia timer1 100Hz too (*after* setting our timer!)
+lda #&FE
+sta &FE44 \ sysvia T1L
+lda #&26
+sta &FE45 \ sysvia T1H
+cli
+rts
+
+.noploop
+nop:nop:nop:nop
+nop:nop:nop:nop
+nop:nop:nop:nop
+nop:nop:nop:nop
+nop:nop:nop:nop
+nop:nop:nop:nop
+nop:nop:nop:nop
+nop:nop:nop:nop
+jmp noploop
+
+
+\before we get here:
+\ DC1C    STA     &FC     ;3
+\ DC1E    PLA             ;4
+\ DC1F    PHA             ;3
+\ DC20    AND     #&10    ;2
+\ DC22    BNE     &DC27   ;2
+\ DC24    JMP     (&0204) ;5
+\ = 19 cycles
+
+.ourirq1v
+bit &FE6D
+bpl notours \ not uservia
+bvs timer1
+.notours
+jmp 0
+
+.timer1
+stx xtmp
+sty ytmp
+lda &FE64 \read T1L, clear interrupt, also sync to 1MHz due to cycle stretching
+sta &80
+and #7
+eor #7
+sta branch+1
+.branch
+bpl branch \always
+.slide
+nop:nop:nop:nop
+nop:nop:nop
+
+ldx &FE65
+stx &81
+ldx &FE44
+stx &82
+ldx &FE45
+stx &83
+lda #&F6 \ red
+ldx #&F4 \ yellow
+ldy #0 \ 256 lines
+.loop
+\ displayed line = 128 cycles
+sta &FE21 \ 4
+stx &FE21 \ 4
+sta &FE21 \ 4
+stx &FE21 \ 4
+sta &FE21 \ 4
+stx &FE21 \ 4
+sta &FE21 \ 4
+stx &FE21 \ 4
+sta &FE21 \ 4
+stx &FE21 \ 4
+stx &FE21 \ 4
+stx &FE21 \ 4
+sta &FE21 \ 4
+sta &FE21 \ 4
+sta &FE21 \ 4
+stx &FE21 \ 4
+sta &FE21 \ 4
+stx &FE21 \ 4
+sta &FE21 \ 4
+stx &FE21 \ 4
+\ horizontal blanking interval = 48 cycles
+nop:nop:nop:nop:nop \ 10
+nop:nop:nop:nop:nop \ 10
+nop:nop:nop:nop:nop \ 10
+nop:nop:nop:nop:nop \ 10
+cmp #0 \3
+dey \ 2
+bne loop \ 3
+
+.ret2
+ldx xtmp
+ldy ytmp
+lda &FC
+rti
+]NEXT
+CALL start
+REMCALL noploop
+M%=0
+N%=&FFFF
+@%=&607
+*FX19
+*FX19
+REPEAT
+A%=?&80+?&81*256
+B%=?&82+?&83*256
+IF A%>M% M%=A%
+IF A%<N% N%=A%
+PRINT"* * *",~A%,~N%,~M%,~B%
+IF INKEY-99:M%=0:N%=&FFFF
+UNTIL0

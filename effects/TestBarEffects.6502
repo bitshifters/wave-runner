@@ -1,0 +1,110 @@
+.TestEffectStart
+{
+
+; TIMINGS:
+; 128 + 33 + 32 + 2 CYCLES until the point where if you did STA &FE21 it would take effect on the
+; first pixel of the first line. So you have a few cycles less than this to effect any changes to CRTC,
+; and the 'effect render' fn is entered approx. 1.5 rasterlines BEFORE the start of the frame.
+
+
+JSR wait128
+WAIT_33
+WAIT_32
+
+
+; DRAW ONE GREEN LINE: STA green col to palette reg, wait 80 - 4 = 76 cycles, store black.
+{
+    ; TWO CYCLES FROM EFFECT START TO FIRST PALETTE WRITE...
+    lda #mainColToGreen ; 2
+    STA &FE21 ; 4
+    ; need to wait for 74 cycles, then LDA blackcolour, STA to palette reg
+    LDY #14 ; 2 ... need to wait for 72 cycles. Loop below will wait for 13 * 5 + 4 = 69.
+    .waitloop
+    dey
+    BNE waitloop
+    NOP: EQUB &33           ; 69 + 3 = 72, +2 because of the LDY #14 == 74!
+    LDA #mainColToBlack     ; + 2 = 76
+    STA &FE21
+}
+
+; And now we wait to start of second line... we have to LDY, and LDX, hence wait for 128 - 80 - 4 = 44
+    LDY #7
+    .waituntilSecondLine
+    dey
+    BNE waituntilSecondLine
+    NOP:NOP
+
+    ldy #254 \ 254 lines  \\ -> 54
+    .loop
+    \ displayed line = 128 cycles
+    ldx #mainColToWhite \ 2 -> 56
+
+    \\ ... followed by 20 * 4 = 80, cumulative 82...
+    stx &FE21 \ 4
+    sta &FE21 \ 4
+    stx &FE21 \ 4
+
+    ldx #mainColToGreen
+    stx &FE21 \ 8 = 24
+
+    ldx #mainColToYellow
+    nop
+    stx &FE21 \ 4
+
+    ldx #mainColToMagenta
+    nop
+    stx &FE21 \ 4
+
+    ldx #mainColToRed
+    nop
+    stx &FE21 \ 4
+
+    ldx #mainColToCyan
+    nop
+    stx &FE21 \ 4
+
+    ldx #mainColToBlue
+    nop
+    stx &FE21 \ 4
+
+    nop
+    ldx #mainColToWhite
+    sta &FE21 \ 4
+
+    nop
+    stx &FE21 \ 4
+    sta &FE21 \ 4
+    stx &FE21 \ 4
+    \ horizontal blanking interval = 48 cycles
+    \\ Immediate set colour to red so we can see when we've
+    \\ got timings wrong and ended up changing palette for stuff
+    \\ that's offscreen
+    \\ IF you wanted to, the FINAL time through could be unrolled into
+    \\ a separate pass which pre-loaded mainColiftenToRed into y, so you could
+    \\ immediately write to the palette instead of having to load it into
+    \\ x like we do below. This would ensure that the final transition to red happened at the same frequency
+    \\ as all the other colour bars, instead of being offset by half a bar.
+    ldx #mainColToRed \2 == 84
+    stx &FE21 \4 == 88
+    nop \ 2 == 90
+    nop:nop:nop:nop:nop \ 10 == 100
+    nop:nop:nop:nop:nop \ 10 == 110
+    nop:nop:nop:nop:nop \ 10 == 120
+
+    cmp &0 \3 == 123
+    dey \ 2 == 125
+    bne loop \ 3 == 128
+
+; FINAL RED LINE
+    lda #mainColToRed ; 2
+    STA &FE21 ; 4
+    LDY #15 ; 2 ... need to wait for another 74 cycles before palette store. Loop below will wait for 14 * 5 + 2 = 72.
+    .waitloopFinalLine
+    dey
+    BNE waitloopFinalLine
+    LDA #mainColToBlack     ; + 2 = 76
+    STA &FE21
+
+    jmp EffectRenderReturn
+}
+.TestEffectEnd

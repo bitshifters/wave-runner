@@ -1,0 +1,306 @@
+;*************************************
+; Effect: Logo introduction
+;
+; This effect renders the Bitshifters logo. The logo is made up of a number of lines, many of which
+; are the same. There are only 13 unique lines (the first of which is pure black). To generate unique
+; lines from the original log, a C# Tool ("ImageProcessor") was written which extracts the unique lines
+; and creates a new image file consisting of each unique line repeated eight time.
+;
+; This means that each unique line exists starting at an address that the CRTC is able to use on the first
+; cycle.
+;
+; A 256-entry table specifies, for each line in the original four-logo image, which index it maps to
+; in the table of unique lines.
+; A second table (of size: <number of unique lines>, ie 13) maps from unique line indices to memory addresses.
+; Another 256-entry table specifies which colour to apply on each line.
+;
+; The CRTC runs 256 1-line cycles, followed by a final 56-line cycles to complete the frame.
+; Each scanline, a 16-bit counter is incremented and if there was a carry between the low and high
+; byte then the CRTC is set to display the appropriate line from the logo, otherwise it is set to
+; display the blank line. This effectively means that the logo 'splits up' into a sequence of 'drawn' and
+; 'black' lines depending on how much is added each frame. 
+
+;*************************************
+
+ALIGN &100
+
+; Which index in the 256-entry table of indices the effect will start on when drawing the frame.
+; Adjusting this makes the entire image move up or down. However for this demo it was not used and
+; stays always at zero.
+lineTableStartIndexHigh = effectVariables + 0
+lineTableStartIndexLow = effectVariables + 1
+
+; Starting at lineTableStartIndexHigh, this counter increments every scanline.
+; When there is a carry from the low to the high byte, the line is drawn. Otherwise black.
+lineTableCurrentIndexHigh = effectVariables + 2
+lineTableCurrentIndexLow = effectVariables + 3
+
+; The value added to lineTableCurrentIndex each scanline. Change this to amend spacing of lines.
+lineIncrementLow = effectVariables + 4
+lineIncrementHigh = effectVariables + 5
+
+; There must always be a line in the 256-entry line table that points to a blank line.
+; This variable indicates which one that is.
+lineIndexForBlankLine = 1
+
+; Given: X is scanLine index
+; Returns: index in unique lines table in Y. Zero unless there was a carry from low to high byte...
+; Trashes A, leaves X unchanged.
+; Takes 23 cycles plus JTS and RTS (12) == 35 cycles to call it and get result in Y
+.chooseLineIndex
+	CLC									; 2
+	LDA lineTableCurrentIndexLow		; 3 (assuming zero page)
+	ADC lineIncrementLow				; 3 ditto
+	STA lineTableCurrentIndexLow		; 3
+	BCS carryHappened					; 2/3
+.carryDidntHappen
+	LDA lineTableCurrentIndexHigh		; 3
+	ADC lineIncrementHigh 				; 3
+	STA lineTableCurrentIndexHigh		; 3
+	LDY #lineIndexForBlankLine			; 2
+	EQUB &33	 						; 1 (Correct for branch taken / not taken cycle difference)
+	RTS									; 6
+.carryHappened
+	LDA lineTableCurrentIndexHigh		; 3
+	ADC lineIncrementHigh 				; 3
+	STA lineTableCurrentIndexHigh		; 3
+	TAY								    ; 2
+	RTS									; 6
+
+; Main render function for the effect.
+.BitshiftersLogo_Render	
+	JSR chooseLineIndex				; Get the index into the 256-entry table of indices used by the first scanline.
+    LDA BitshiftersLogo_LineTable,Y ; Use that index to obtain the entry into the table of unique lines.
+	TAY ; 2
+
+    ; Set up CRTC with screen address for first scanline...
+    LDA #13: STA &FE00				; 8
+    LDA BitshiftersLogo_LineAddressTableLow,Y : STA &FE01   ; 10
+
+    LDA #12: STA &FE00				; 8
+    LDA BitshiftersLogo_LineAddressTableHigh,Y : STA &FE01  ; 10
+
+	; Wait for the required number of cycles to ensure that the loop below starts at the right time.
+	; (Partway through the first scanline).
+	WAIT_32
+	WAIT_32
+	WAIT_32
+	WAIT_19
+
+	; 194!
+
+    LDX #0 ; 2
+
+	\\ R9 = 0 = 1 scanline
+	LDA #9: STA &FE00 ; 8
+	LDA #0:	STA &FE01 ; 8
+
+	\\ R4=0 - CRTC cycle is one row
+	LDA #4: STA &FE00 ; 8
+	LDA #0: STA &FE01 ; 8
+
+	\\ R7=&FF - no vsync
+	LDA #7:	STA &FE00 ; 8
+	LDA #&FF: STA &FE01 ; 8
+
+	\\ R6=0 - one row displayed
+	LDA #6: STA &FE00 ; 8
+	LDA #1: STA &FE01 ; 8 * 8c = 64c
+
+	; Begin loop that is run once per scanline for the remainder of the visible frame.
+    .logoLineLoop
+
+	; Get the index into 256-entry table of unique line indices that will be used to render the 'next' scanline...
+	JSR chooseLineIndex
+	
+	; ... and using that index, look up the palette entry (in the 256-entry table of palette values) and set the logo colour.
+	LDA BSLogo_PaletteEntries,Y
+	STA &FE21
+	ORA #%01000000
+	STA &FE21
+	ORA #%00010000
+	STA &FE21
+	AND #%10111111
+	STA &FE21
+
+	; Look up into unique lines table.
+    LDA BitshiftersLogo_LineTable,Y ; 4
+	TAY ; 2
+
+    ; Set CRTC with screen address for next line...
+    LDA #13: STA &FE00				; 8
+    LDA BitshiftersLogo_LineAddressTableLow,Y : STA &FE01   ; 10
+
+    LDA #12: STA &FE00				; 8
+    LDA BitshiftersLogo_LineAddressTableHigh,Y : STA &FE01  ; 10
+
+	; Delay so the loop takes 128 cycles
+    WAIT_18
+
+    INX ; 2
+    BNE logoLineLoop ; 3 (when taken)
+
+    ; Now set up the remaining bit of the CRTC cycle, to complete one 312-line frame with vsync in right place.
+
+	\\ R4=55 - CRTC cycle is 56 character rows
+	LDA #4: STA &FE00
+	LDA #55: STA &FE01
+
+	\\ R7=17 - vertical sync position
+	LDA #7: STA &FE00
+	LDA #17: STA &FE01
+
+	\\ R6=0 - zero rows displayed == turn off! ... except it doesn't work on real hardware, so stick with R6=1
+	LDA #6: STA &FE00 ; 8
+	LDA #1: STA &FE01 ; 8 * 8c = 64c
+
+	; We're done. Return to the code that calls the Effect Render functions.
+    JMP EffectRenderReturn
+
+
+
+; On effect shutdown, pPalette must go to black so the CRTC reset and start of next effect have black screen.
+.BSLogo_Shutdown
+LDA #HI(paldata_Mode1_Black)
+LDY #LO(paldata_Mode1_Black)
+JSR SetPalette_Mode1
+RTS
+
+.BitshiftersLogo_Update
+; Load 'current' from 'start'
+LDA lineTableStartIndexHigh
+STA lineTableCurrentIndexHigh
+LDA lineTableStartIndexLow
+STA lineTableCurrentIndexLow
+
+; Make sure to reset screen base address after each frame has rendered.
+JSR resetScreenBaseAddress
+
+JMP EffectUpdateReturn
+
+; Clear the effect workspace when the effect starts, and then set lineIncrementLow to 255 which has the effect
+; of making the logo screen appear 'normal', that is, the logos are neither stretched nor squashed.
+.BSLogo_Start
+JSR ZeroEffectWorkspace
+LDA #255
+STA lineIncrementLow
+RTS
+
+.BitshiftersLogo_Timeline
+
+; 200 frames (4 seconds) from effect start, start unpacking the image that contains each unique line repeated 8 times.
+; This unpacking (which happens in the background) is what does the initial 'fade' from a white screen to the logo screen.
+TimelineEntryHeader tc_waitType_sinceLastTimelinePoint, 200
+Timeline_BeginDecrunch BS_logo_uniquelines_start, 4
+
+; During development we put in additional lines at the very top and bottom of the screen that were a different colour
+; and let us distinguish them from the rest of the logo screen. They were not used for the final release.
+;TimelineEntryHeaderForFlag tc_waitType_decrunchDone
+;Timeline_BeginDecrunch BS_logo_crunched_start, 4
+;Timeline_BeginDecrunch BS_logo_start_and_end_lines, 4
+
+; Wait until the previous decrunch is complete, then unpack the first screen of the next effect to shadow memory.
+TimelineEntryHeaderForFlag tc_waitType_decrunchDone
+Timeline_BeginDecrunch Presents2Screen, 4 OR decrunchFlags_ToShadowMemory
+
+; Three tasks are then kicked off in sequence to make the logo expand, contract, then expand again.
+TimelineEntryHeader tc_waitType_sinceDemoStart,390
+Timeline_BeginTaskInterpolateFromAToB lineIncrementLow, 95, 255, 160
+
+TimelineEntryHeader tc_waitType_sinceLastTimelinePoint,95
+Timeline_BeginTaskInterpolateFromAToB lineIncrementLow, 95, 160, 255
+
+TimelineEntryHeader tc_waitType_sinceLastTimelinePoint,95
+Timeline_BeginTaskInterpolateFromAToB lineIncrementLow, 168, 255, 87
+
+; Finally, after a bit more of a delay, move to the next effect. The timing was chosen so the
+; effect transition happens at a point where the music changes.
+TimelineEntryHeader tc_waitType_sinceLastTimelinePoint, 168
+TimelineFunction_1Arg tl_fnIndex_swapToEffect, 255
+
+
+ALIGN &100
+; Each entry here (there are 256) is an index in the table of 'unique lines' for the logo.
+.BitshiftersLogo_LineTable
+;EQUB 13			; This was for debugging -- its an additional line of a different colour
+FOR n, 0, 9
+EQUB 0
+NEXT
+include "intermediate/bslogo_single_indices.6502"
+FOR n, 0, 3
+EQUB 0
+NEXT
+include "intermediate/bslogo_single_indices.6502"
+FOR n, 0, 3
+EQUB 0
+NEXT
+include "intermediate/bslogo_single_indices.6502"
+FOR n, 0, 3
+EQUB 0
+NEXT
+include "intermediate/bslogo_single_indices.6502"
+FOR n, 0, 9
+EQUB 0
+NEXT
+;EQUB 14		; For debugging.
+.BitshiftersLogo_LineTableEnd
+
+Assert (BitshiftersLogo_LineTableEnd - BitshiftersLogo_LineTable) == 256
+
+PRINT "Bitshifters logo line array size:", ~(BitshiftersLogo_LineTableEnd - BitshiftersLogo_LineTable)
+
+ALIGN &100
+.BSLogo_PaletteEntries
+; Each entry here (there are 256) is a palette value which needs sending to the palette register four times,
+; with all possible permutations of bits 6 and 4 (2nd and 4th most significant).
+for n,0,9
+; Black
+EQUB %00100111
+next
+for n,0,55
+; Logical colour 1 to physical red
+EQUB %00100110
+next
+for n,0,3
+; Black
+EQUB %00100111
+next
+for n,0,55
+; Logical colour 1 to physical green
+EQUB %00100101
+next
+for n,0,3
+; Black
+EQUB %00100111
+next
+for n,0,55
+; Logical colour 1 to physical yellow
+EQUB %00100100
+next
+for n,0,3
+; Black
+EQUB %00100111
+next
+for n,0,55
+; Logical colour 1 to physical blue
+EQUB %00100011
+next
+for n,0,9
+; Black
+EQUB %00100111
+next
+.BSLogo_PaletteEntriesEnd
+
+lineWidthInBytes = 320 / 4
+
+; And this is the table that maps from line indices to actual addresses in memory
+.BitshiftersLogo_LineAddressTableHigh
+FOR n, 0, 31
+EQUB HI((screen_base_addr + lineWidthInBytes * n * 8) / 8)
+NEXT
+
+.BitshiftersLogo_LineAddressTableLow
+FOR n, 0, 31
+EQUB LO((screen_base_addr + lineWidthInBytes * n * 8) / 8)
+NEXT
+

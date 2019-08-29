@@ -1,0 +1,49 @@
+Block of up to N "tasks"
+
+Tasks are executed each frame until done. They can loop N times.
+When done, they can kick off another task?
+
+Task directory:
+List of function addresses. Each one executes a particular task.
+Tasks also have state. A small block of memory whose layout depends on the particular task.
+
+
+Each task has:
+Function address.
+State...
+
+
+
+
+Let's cut this back to basics...
+
+Write a fn that, when called:
+
+- Is provided with an address on ZP.
+- Uses that address, takes an offset from it, reads another address. This is the 'target address'.
+- Takes another offset, reads a 16-bit value. This is the 'amount to add'.
+- Adds the 16-bit value to the target.
+- Takes a third offset which points to a 16-bit loop counter. Decrements it.
+
+Then write a function that calls that function, having first put appropriate address into ZP address.
+And write a 'setup' function that creates the initial state.
+
+
+Task block structure:
+
+HEADER:
+0,1: 'Loops remaining' counter. Decremented once per frame until it hits zero. Then task block will no longer be called and can be restarted or replaced.
+2,3: 'Task function'. Function to call once per frame as long as task is still active.
+
+TASK STATE:
+4 (currently) bytes of data whose interpretation depends on the task:
+
+
+Task: Add 16 bit constant to target value on ZP.
+4: ZP address (ie one-byte offset from &0000) of the LSB of the target variable. (Which is stored low-byte first)
+5: Low byte of value to be added
+6: High byte of value to be added
+7: unused
+
+
+

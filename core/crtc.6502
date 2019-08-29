@@ -1,0 +1,124 @@
+;*************************************
+; crtc: Functions and data for controlling the 6845 CRTC.
+;
+; This file also contains the update and render functions for the "Reset CRTC" effect, which is used
+; to reset the CRTC to 'normal' operation after an effect has been running that uses 1-line vertical rupture.
+;
+;*************************************
+
+; This is used by the 'reset CRTC' effect. It is a flag that indicates whether the effect is on its first frame
+; (where it must behave differently to subsequent frames).
+crtcResetFirstFrame = effectVariables
+
+; The value of all CRTC registers for a standard MODE1 screen layout.
+.crtcregs_mode1
+	EQUB &7F			; R0  horizontal total
+	EQUB &50			; R1  horizontal displayed
+	EQUB &62			; R2  horizontal position
+	EQUB &28			; R3  sync width
+	EQUB &26			; R4  vertical total
+	EQUB &00			; R5  vertical total adjust
+	EQUB &20			; R6  vertical displayed
+	EQUB &22			; R7  vertical position
+	EQUB &00			; R8  interlace
+	EQUB &07			; R9  scanlines per row
+	EQUB &67			; R10 cursor start
+	EQUB &08			; R11 cursor end
+	EQUB HI(screen_base_addr/8)	; R12 screen start address, high
+	EQUB LO(screen_base_addr/8)	; R13 screen start address, low
+    
+	; Resets the registers that are changed to implement 1-line vrup back to MODE1 defaults.
+	; Does NOT reset screen address of shadow/main RAM crtc read state.
+.resetAfterOneLineVRUP
+	; R4 = 38
+	LDA #4: STA &FE00
+	LDA #38: STA &FE01
+	; R7 = 34
+	LDA #7: STA &FE00
+	LDA #34: STA &FE01
+	; R6 = 32
+	LDA #6: STA &FE00
+	LDA #32: STA &FE01
+	; R9 = 7
+	LDA #9: STA &FE00
+	LDA #7: STA &FE01
+	RTS
+    
+	; Runs one cycle of one row where lines-per-row = 7 (R9 = 6), then 38 cycles with R9 = 7 (8 lines per character row).
+	; This corrects for a bug/feature of the CRTC where if you change R9 while on the LAST row of a character, it does
+	; an additional one-line cycle before starting to use the new R9 value.
+.resetFirstFrameBehaviour
+	; R4 = 0 (one char row)
+	LDA #4: STA &FE00
+	LDA #0: STA &FE01
+	; R7 = 34
+	LDA #7: STA &FE00
+	LDA #34: STA &FE01
+	; R6 = 32
+	LDA #6: STA &FE00
+	LDA #32: STA &FE01
+	; R9 = 6 (7 lines per char row)
+	LDA #9: STA &FE00
+	LDA #6: STA &FE01
+
+	; That took 64 cycles... wait until next character row, which is 128 cycles times 6 + 64 cycles
+	WAIT_32
+	WAIT_32
+	JSR wait128
+	JSR wait128
+	JSR wait128
+	JSR wait128
+	JSR wait128
+	JSR wait128
+
+	; R4 = 37 (38 char rows)
+	LDA #4: STA &FE00
+	LDA #0: STA &FE01	
+	; R9 = 7 (8 lines per char row)
+	LDA #9: STA &FE00
+	LDA #7: STA &FE01
+	RTS
+
+; Reset start address to be the 'start' (lowest address) in the 20kb window from &3000 - &7FFF.
+.resetScreenBaseAddress
+	LDA #12: STA &FE00
+	LDA #HI(screen_base_addr / 8): STA &FE01
+	LDA #13: STA &FE00
+	LDA #LO(screen_base_addr / 8): STA &FE01
+	RTS
+
+; This is the 'Render' function for the ResetCRTC effect.
+.ResetCRTC
+{
+	; Wait until on first line, then reset...
+	JSR wait128
+	WAIT_32
+	WAIT_28
+
+	LDA #1
+	CMP crtcResetFirstFrame
+	; If this is the first frame since effect started, run resetFirstFrameBehaviour otherwise drop through
+	; to the 'second and subsequent frames' behaviour.
+	BNE isSecondFrame
+	STZ crtcResetFirstFrame
+	JSR resetFirstFrameBehaviour
+	BRA done
+	.isSecondFrame
+	JSR resetAfterOneLineVRUP
+	JSR resetScreenBaseAddress
+	.done
+	JMP EffectRenderReturn
+}
+
+; Very simple timeline, just runs for 3 frames, and then jumps to next effect.
+.timeline_resetCRTC
+TimelineEntryHeader tc_waitType_sinceLastTimelinePoint, 3
+TimelineFunction_1Arg tl_fnIndex_swapToEffect, 255
+.timeline_resetCRTC_END
+
+
+; 'Start' function (called when transitioning to this effect) just sets the flag that says it's the first frame.
+.ResetCRTCBegin
+LDA #1
+sta crtcResetFirstFrame
+RTS

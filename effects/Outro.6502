@@ -1,0 +1,166 @@
+;*************************************
+; Effect: Outro logos
+;
+; This is a relatively simple effect that renders a sequence of logos which fade into one another.
+; (In actual fact, only two images ... but could easily have been extended to any number, subject
+; to memory constraints).
+; 
+; One image is loaded into a main RAM and a second one into shadow RAM.
+; The fading is done by choosing, per-line, whether to render from shadow RAM or main RAM.  A 256-entry table
+; determines main/shadow status for each line.
+;
+; It is then relatively easy to fade from one image to the other by having a second table that contains the
+; 'other' setting (e.g. if the current table contains all 'render from shadow' then the source table would
+; contain all 'render from main') and using the 'CopyData' task to copy from the source to the destination
+; table in a random order.
+;
+;*************************************
+
+.OutroRender
+{
+    ; Wait until near to the beginning of the visible frame.
+    JSR wait128
+    WAIT_40
+
+
+    ldy #0  \\ Set up Y to count 256 lines. 
+
+    .loop
+    LDA lineShadowTable,Y   ; 4 .. load shadow/main state for this line (this is either 0 or 1)
+    TSB &FE34               ; 6 .. if bit 0 is set, set it in ACCON
+    EOR #%00000001          ; 2 .. invert bit 0
+    TRB &FE34               ; 6 .. and now it it's set (ie it was clear when loaded), clear it in ACCON
+
+    ; Wait so the loop takes 128 cycles
+    WAIT_35
+    WAIT_35
+    WAIT_35
+
+    ; Must be 123 cycles to here...
+    dey \ 2 == 125
+    bne loop \ 3 == 128
+
+    ; Loop has finished, we're done rendering this frame!
+    JMP EffectRenderReturn
+}
+
+; This is the last effect in the demo, so when it finishes, we reset the machine.
+.OutroEnd
+JMP (&FFFC)
+
+; The update function does nothing.
+.OutroUpdate
+JMP EffectUpdateReturn
+
+
+.OutroSetup
+; Set to MODE2
+LDA #&F4
+STA &FE20
+
+; Set all colours to black. They are set back to standard Mode2 by the timeline.
+LDA #HI(paldata_Mode1_Black)
+LDY #LO(paldata_Mode1_Black)
+JSR SetPalette_Mode1
+
+; The previous effect (Cheq) leaves the CRTC R1 set to a non-standard value so we reset it here.
+lda #1:sta $fe00:lda #80:sta $fe01
+
+; Make sure the CRTC is generating addresses starting at the right point.
+JSR resetScreenBaseAddress
+
+; The task that copies data from one table to another in random order (CopyData) makes use of a table of 256
+; random numbers. Because this table typically sits in sideways RAM, it is necessary to make sure that the code
+; is patched up to refer to the correct memory address for the table, depending on which SWR bank is in use.
+; The four lines below patch up the CopyData function to refer to the table that sits in the bank used by this effect.
+LDA #LO(randomTableForOutro)
+STA copyDataIndicesAddress + 1
+LDA #HI(randomTableForOutro)
+STA copyDataIndicesAddress + 2
+
+; This four lines below alter the 'Effect Declaration' table in the following way:
+; - The 'cleanup' function for this effect (Outro) is set to the address of the 'OutroEnd'
+; function. (When the effect declaration code is run at demo startup, the cleanup function is
+; set to a 'null' function that does nothing).
+;
+; The reason that we don't simply set the cleanup function to OutroEnd when the demo starts, is that in order
+; to transition *to* the first effect, the demo behaves as it was *ending* the previous (ie last) effect when
+; is starts. Since OutroEnd resets the machine, if it was the 'cleanup' function for the final effect
+; when the demo started up, the demo would immediately reset!
+LDA #LO(OutroEnd)
+STA effectCleanupTableHigh + fxIndex_Outro
+LDA #HI(OutroEnd)
+STA effectCleanupTableLow + fxIndex_Outro
+RTS
+
+.timeline_outro
+; As soon as this effect start, start unpacking the first Outro image.
+; (We ran out of time to implement it, but it would have been possible to unpack this image during
+; the previous effect, and then we could have displayed the first image immediately).
+TimelineEntryHeaderForFlag tc_waitType_immediate
+Timeline_BeginDecrunch Outro, 6
+
+; As soon as the decrunch completes, flip the palette to standard Mode2, to display it.
+TimelineEntryHeaderForFlag tc_waitType_decrunchDone
+TimelineFunction_2Arg fl_fnIndex_setPaletteMode2, HI(paldata_mode2), LO(paldata_mode2)
+
+; And immediately start decrunching the final goodbye image, but to shadow memory.
+TimelineEntryHeaderForFlag tc_waitType_immediate
+Timeline_BeginDecrunch Goodbye, 6 OR decrunchFlags_ToShadowMemory
+
+; Wait for 5 seconds, then start a task that copies the shadow/main state from the 'all shadow'
+; table into the current ('all main') table, using random indices.
+TimelineEntryHeader tc_waitType_sinceLastTimelinePoint, 250
+Timeline_BeginTaskCopyData lineShadowTableFromShadow, lineShadowTable, 0, 1, 256
+
+; Wait again for a bit longer than 5 seconds, then start decrunching a pure black image into main RAM...
+TimelineEntryHeader tc_waitType_sinceLastTimelinePoint, 270
+Timeline_BeginDecrunch Black, 6
+
+; ... and as soon as it's decrunched, spawn another task to copy back the 'render from main' values
+; There is a bug here: This was supposed to fade the final image to black, but instead it seemed to randomly fade
+; some of the lines to black but then back to visible again. It looked like a nice effect, so we left it as-is!
+TimelineEntryHeaderForFlag tc_waitType_decrunchDone
+Timeline_BeginTaskCopyData lineShadowTableFromMain, lineShadowTable, 0, 1, 256
+
+; And finally we end the demo! Wait for 10 seconds, then jump to the next effect, which will run the shutdown code
+; for this effect, which will reset the machine!
+TimelineEntryHeader tc_waitType_sinceLastTimelinePoint, 500
+TimelineFunction_1Arg tl_fnIndex_swapToEffect, 255
+
+
+ALIGN &100
+.lineShadowTable  ; This table is used per-line to determine whether to render from shadow or main memory.
+FOR N, 0, 255
+EQUB 0 ; Render from main memory.
+NEXT
+
+.lineShadowTableFromShadow
+FOR N, 0, 255
+EQUB 1 ; Render from shadow memory
+NEXT
+
+.lineShadowTableFromMain
+FOR N, 0, 255
+EQUB 0 ; Render from main memory.
+NEXT
+
+ALIGN &100
+; A table of 256 random numbers, where the values from 0 to 255 appear once each.
+.randomTableForOutro
+EQUB 74, 177, 220, 50, 142, 46, 63, 241, 88, 96, 128, 206, 7, 20, 230, 31
+EQUB 218, 193, 121, 54, 148, 127, 253, 116, 130, 139, 95, 126, 75, 62, 16, 176
+EQUB 227, 131, 108, 168, 140, 213, 156, 124, 111, 91, 112, 157, 18, 204, 25, 202
+EQUB 180, 200, 52, 26, 170, 179, 145, 217, 21, 65, 78, 160, 86, 48, 99, 254
+EQUB 24, 169, 190, 225, 150, 2, 27, 188, 57, 113, 103, 68, 250, 186, 56, 191
+EQUB 249, 134, 58, 33, 185, 41, 15, 109, 245, 79, 49, 165, 1, 167, 152, 207
+EQUB 28, 219, 229, 92, 143, 175, 195, 94, 215, 172, 38, 248, 35, 5, 97, 137
+EQUB 146, 85, 129, 222, 105, 205, 192, 210, 221, 243, 211, 161, 189, 72, 110, 181
+EQUB 236, 30, 14, 133, 10, 82, 36, 90, 223, 76, 118, 163, 115, 173, 83, 233
+EQUB 77, 66, 159, 197, 84, 98, 237, 209, 174, 104, 187, 154, 228, 199, 42, 123
+EQUB 242, 244, 238, 132, 71, 32, 47, 158, 149, 231, 106, 117, 162, 138, 51, 184
+EQUB 239, 201, 22, 43, 122, 93, 164, 81, 59, 80, 224, 4, 119, 9, 87, 70
+EQUB 125, 64, 141, 73, 61, 247, 69, 6, 151, 17, 226, 196, 246, 89, 11, 53
+EQUB 135, 194, 198, 120, 102, 60, 23, 67, 0, 234, 252, 182, 240, 8, 107, 232
+EQUB 183, 45, 144, 235, 166, 34, 216, 214, 136, 37, 40, 55, 44, 19, 13, 171
+EQUB 178, 153, 203, 3, 29, 100, 147, 101, 39, 208, 251, 12, 212, 114, 155, 255

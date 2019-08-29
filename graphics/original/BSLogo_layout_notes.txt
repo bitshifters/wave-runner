@@ -1,0 +1,15 @@
+Each logo is 49 pix high.
+
+Vertical layout is:
+
+
+10 pix black
+(49 pix logo)
+11 pix black
+(49 pix logo)
+11 pix black
+(49 pix logo)
+11 pix black
+(49 pix logo)
+17 pix black
+

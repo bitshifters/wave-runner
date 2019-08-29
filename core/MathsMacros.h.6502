@@ -1,0 +1,87 @@
+;*************************************
+; Macros for performing a variety of addition/subraction operations.
+;
+;*************************************
+
+; Timings assume that the macro uses Zero-page locations, and does not cross a page boundary
+; This takes 13 cycles if the high byte did not need to be incremented, 17 if it did
+MACRO SixteenBitAddConstant highAddress, lowAddress, amount
+{
+IF amount<>0
+IF amount==1
+	INC lowAddress
+	BNE noCarry
+ELSE
+	CLC				\\ 2
+	LDA lowAddress	\\ 3 (if ZP)
+	ADC #amount		\\ 2
+	STA lowAddress	\\ 3
+	BCC noCarry		\\ 2 (if branch not taken), 3 (if taken)
+ENDIF
+	INC highAddress	\\ 5
+	.noCarry
+ENDIF
+}
+ENDMACRO
+
+MACRO SixteenBitAddEightBit highAddress, lowAddress, lowAddressToAdd
+{
+	CLC				\\ 2
+	LDA lowAddress	\\ 3 (if ZP)
+	ADC lowAddressToAdd		\\ 3
+	STA lowAddress	\\ 3
+	BCC noCarry		\\ 2 (if branch not taken), 3 (if taken)
+	INC highAddress	\\ 5
+	.noCarry
+}
+ENDMACRO
+
+\\ Always takes 20 cycles.
+MACRO SixteenBitAdd highAddress, lowAddress, highAddresToAdd, lowAddresToAdd
+{
+	CLC					\\ 2
+	LDA lowAddress		\\ 3 (assuming zero page)
+	ADC lowAddresToAdd	\\ 3 ditto
+	STA lowAddress		\\ 3 ditto
+	LDA highAddress		\\ 3
+	ADC highAddresToAdd \\ 3
+	STA highAddress		\\ 3
+}
+ENDMACRO
+
+
+MACRO SixteenBitSub highAddress, lowAddress, highAddresToSub, lowAddresToSub
+{
+	SEC
+	LDA lowAddress
+	SBC lowAddresToSub
+	STA lowAddress
+	LDA highAddress
+	SBC highAddresToSub
+	STA highAddress
+}
+ENDMACRO
+
+MACRO SixteenBitSubConstant highAddress, lowAddress, amount
+{
+	SEC
+	LDA lowAddress
+	SBC #amount			
+	STA lowAddress
+	BCS noCarry
+	DEC highAddress
+	.noCarry
+}
+ENDMACRO
+
+MACRO SixteenBitSubEightBit highAddress, lowAddress, lowAddressToSub
+{
+	SEC
+	LDA lowAddress
+	SBC lowAddressToSub			
+	STA lowAddress
+	BCS noCarry
+	DEC highAddress
+	.noCarry
+}
+ENDMACRO

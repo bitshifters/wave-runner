@@ -1,0 +1,7 @@
+effectCount = 8
+effectWorkspaceSize = 32
+
+.effectVariables
+\\ All effects define their own offsets into the effect workspace.
+SKIP effectWorkspaceSize
+.effectWorkspaceEnd

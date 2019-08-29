@@ -1,0 +1,12 @@
+Things to experiment with post-Wave-Runner.
+
+Scrolltext:
+- Fix the bug causing incorrect colour at the top.
+- Make Scrolltext wibble more interesting by varying the
+xWibble rate of change over time, ie make xWibble itself change according to a sine wave or some other pattern.
+- Change yScale addition factor down the screen as well.
+- Coloured glyphs.
+- Animated / rotating glyphs.
+
+General:
+- Fix the "set 16bit value" and "set 16 bit jmp target" timeline functions. (Done in JSBeeb testing branch!)

@@ -1,0 +1,649 @@
+; ******************************************************************
+;
+; This is the 'main' file. It contains:
+; - Zero page declarations that are shared by all the other code.
+; - A lot of the demo framework that ties everything together.
+; - The assembler directives that assemble and save the various sideways RAM banks and the main code block.
+;
+\ ******************************************************************
+
+; We are compiling for Master only!
+CPU 1
+
+; Maximum value in the sine table used by the Scrolltext effect.
+scrolltextWaveSize = 24
+
+; Sine Wibbler wave size.
+sineWibbleWaveSize = 7
+
+; This flips the screen clearing code to use a pattern, but was not used in the final demo.
+clearToPattern = 0
+
+; Map effect 'slots' to SWR banks
+SLOT_BANK0 = 4
+SLOT_BANK1 = 5
+SLOT_BANK2 = 6
+SLOT_MUSIC = 7
+
+; A few hard-coded locations
+irq1v = &204
+brkv=$202
+xtmp=&FA
+ytmp=&FB
+
+; Constants that control the streaming Exomizer 3-based music decompression
+; Where in memory the decompressino buffer/workspace starts.
+EXO_buffer_start = &300
+
+; The buffer size used as workspace for the decompressor. This must match the parameter: -m
+EXO_buffer_len = 3328
+
+; The Exo3 streaming decompressor also requires another 156-byte workspace. This sits right at the end of HAZEL.
+EXO_table = &DF63
+
+include "core/VIAs.6502"
+include "core/Palette.6502"
+include "Patterns.h.6502"
+include "core/MathsMacros.h.6502"
+include "core/DelayMacros.6502"
+
+; Default screen address
+screen_base_addr = &3000
+SCREEN_SIZE_BYTES = &8000 - screen_base_addr
+
+effect_workspace_base_addr = &2000
+effect_workspace_len = screen_base_addr - effect_workspace_base_addr
+
+; We're about to define our zero-page layout. We don't want to get all the way to &F4 because that is used to track
+; the current SWR bank.
+ORG 0
+GUARD &F4
+
+; First we include a file that defines ZP variables needed by the targeted EXO decompressor.
+INCLUDE "lib/exo_targetted.h.asm"
+
+; Now we declare the main demo code ZP usage.
+.frameCountHigh     SKIP 1		; Count of frames since the demo started
+.frameCountLow      SKIP 1
+.previous			SKIP 1		; A sort of general purpose ZP variable. Originally used a lot, now only by Scrolltext effect.
+.spacebarTimer		SKIP 1		; Tracks how long since spacebar pressed. Used only during early debugging development.
+.isShiftPressed		SKIP 1		; Used by debugging keyboard-handling code.
+.withinFrame		SKIP 1		; True (1) when the main interrupt routine which does the render/update is running. False (0) otherwise.
+
+.memoryReaderBasePtrAddress		SKIP 2  ; Two-byte address of location in memory for the start of the current memory-read bank
+.memoryReaderOffset				SKIP 1	; Current 'offset from base' value for memory reading
+
+MACRO SetupMemoryStreamReader bankAddress_zp, positionAddress_zp
+LDA LO(bankAddress_zp)
+STA LO(memoryReaderBasePtrAddress)
+LDA LO(bankAddress_zp + 1)
+STA LO(memoryReaderBasePtrAddress + 1)
+LDA LO(positionAddress_zp)
+STA LO(memoryReaderOffset)
+ENDMACRO
+
+MACRO StoreMemoryStreamReaderState bankAddress_zp, positionAddress_zp
+; Patch up the base address by adding the current offset before storing it.
+CLC
+LDA LO(memoryReaderBasePtrAddress)
+ADC memoryReaderOffset
+STA LO(bankAddress_zp)
+LDA LO(memoryReaderBasePtrAddress+1)
+ADC #0
+STA LO(bankAddress_zp + 1)
+STZ LO(positionAddress_zp)
+ENDMACRO
+
+; Include a number of files that reserve sections of zero-page.
+INCLUDE "lib/vgmplayer.h.asm"
+INCLUDE "lib/exo_raw.h.asm"
+include "scripting/effectsystem_zp.h.6502"
+include "scripting/taskworkspace_zp.h.6502"
+include "scripting/timeline_zp.h.6502"
+
+; Temporary ZP storage used at various points throughout the code
+.tempVarZP SKIP 1
+.tempVarZP2 SKIP 1
+
+.zeroPageLabelsnEnd
+
+ASSERT zeroPageLabelsnEnd < &0100
+
+; Seed the random number generator so the build is repeatable
+; Note: Not currently actually using the RNG!
+RANDOMIZE 42
+
+; Memory from &300 to &1000 is reserved for the streaming Exo3 decompressor workspace (used to decompress the music).
+; The music was compressed to use a 3328 byte (&D00) buffer size as this was the only way to fit it into the
+; 24k window you have available by using one SWR bank plus HAZEL.
+
+; We then assemble all the demo framework code to sit between between &1000 and &2000.
+; &2000 to &3000 is the "Effect Workspace". They are free to write code or data into it as necessary.
+
+\\ Set start address
+ORG &1000
+GUARD effect_workspace_base_addr ; ensure code size doesn't hit start of effect workspace
+
+.mainStart
+rts								; marker for b2's trace on instruction
+
+; A number of variables that used to be in ZP but didn't need to be, all related to the Effect system.
+; TODO: These could all be replaced by EQUBs, using a suitable macro. They are currently filled in at startup.
+; Note that some of these are dynamically changed as the demo runs.
+
+; Which effect is currently running.
+.currentEffectIndex SKIP 1
+
+; Render function to use for each effect.
+.effectRenderTableHigh SKIP effectCount
+.effectRenderTableLow SKIP effectCount
+
+; Update function to use for each effect.
+.effectUpdateTableHigh SKIP effectCount
+.effectUpdateTableLow SKIP effectCount
+
+; Function to run when effect starts, for each effect.
+.effectPrepareTableHigh SKIP effectCount
+.effectPrepareTableLow SKIP effectCount
+
+; Function to run when the effect stops, for each effect.
+.effectCleanupTableHigh SKIP effectCount
+.effectCleanupTableLow SKIP effectCount
+
+; Address of start of timeline for the effect.
+.effectTimlineAddressTableHigh SKIP effectCount
+.effectTimlineAddressTableLow SKIP effectCount
+
+; Sideways Ram slot for each effect
+.swrSlots SKIP effectCount
+
+; Shadow/Main memory state for each effect
+.shadowStates SKIP effectCount
+
+.begin
+
+include "core/vsync.6502"
+
+; Bring in the code that is run when the demo starts. (This also contains the 'background processing' code).
+include "demoStartup.6502"
+
+; This is the main interrupt routine that fires once per frame, 1.5 scanlines before first visible line starts.
+.beginFrame_irq
+; Note that the number of cycles taken by all code up until you read the SysVia
+; T1Low is CRUCIAL. It is carefully set up such that when you read T1L you can
+; AND with 0b111, EOR, and then use the result to jump into a NOP slide.
+; This means that when reading T1L, you have to be in exactly the right place with respect to an 8-cycle repeating loop which starts
+; at the entry point to the IRQ handler but which is also dependent on which value timer1 was initially set to (before it entered
+; its continuous cycle where it cycles at exactly one frame period)
+
+; Check whether this is 'our' interrupt request, ie System VIA Timer1. (In practise, it should never be anything else)
+bit sysViaStart + viaReg_InterruptFlags
+bpl notours		; If not ours, return immediately. If ours, continue.
+bvs wasSysViaT1Irq
+.notours
+lda &FC
+rti
+.wasSysViaT1Irq
+; Cache X and Y. (A was already cached in &FC by the OS interrupt handler).
+stx xtmp
+sty ytmp
+.aboutToReadT1
+lda sysViaStart + viaReg_T1CounterLow \read T1L, clear interrupt, also sync to 1MHz due to cycle stretching
+.t1lInAReadyToSlide
+; Extract lowest 3 bits, use result to control a NOP slide. This corrects for timer jitter and provides stable raster.
+and #7
+eor #7
+sta branch+1
+.branch
+bpl branch \always
+.slide
+; Note: this slide delays (CPU cycles) by TWICE the 'input' to the slide, which is
+; what we want because the T1 counter is 1MHz, but the CPU runs at 2MHz.
+nop:nop:nop:nop
+nop:nop:cmp &3
+
+; Very first thing we do is check that the previous frame's render/update loop had finished.
+LDA withinFrame
+BEQ okToStartNewFrame
+BRK		; If the demo ever hits this, then the previous frame's render/update loop hadn't finished.
+.okToStartNewFrame
+LDA #1
+STA withinFrame		; Store flag saying that we're inside the render/update loop.
+
+LDY currentEffectIndex
+
+; Select Shadow state for current effect
+LDA shadowStates,Y
+STA &FE34
+
+; Select SWR bank for current effect
+LDA swrSlots,Y
+JSR swr_select_slot
+
+.jumpToFrameRender
+jmp &0000				; Patched to target first effect's render function at startup, and subsequent effects as necessary
+.EffectRenderReturn
+
+; Do stuff that happens AFTER screen rasterisation, ie this is our UPDATE EVERYTHING timewindow
+
+	; Do the music...
+	LDA #SLOT_MUSIC:JSR swr_select_slot
+	JSR vgm_poll_player
+
+	; ... and remember to restore the current effect's SWR bank afterwards!
+	LDY currentEffectIndex
+	LDA swrSlots,Y
+	JSR swr_select_slot
+
+; Set memory stream reader up to read from the current effect's timeline
+SetupMemoryStreamReader timelineBankAddress, timelinePos
+
+; Begin debugging 'skip to next frame on spacebar' code (Not used in final demo)
+; Decrement spacebar timer towards, but not beyond, zero
+LDA spacebarTimer
+BEQ spacebarActive
+DEC spacebarTimer
+BPL postSpacebarProcessing
+.spacebarActive
+
+; Check whether spacebar pressed, call the 'jump to next frame' code if pressed. This might not work any
+; more because the code that changes between effects has been heavily refactored and has more side-effects.
+LDA #98       ; Keycode for 'space'
+STA &FE4F
+LDA &FE4F  ; N flag = whether key ('space') is pressed
+BPL spaceNotPressed
+; If we're here then space was pressed and we need to swap the effect, then update the spacebarTimer
+.processSpacebar
+JSR moveToNextEffect
+StoreMemoryStreamReaderState timelineBankAddress, timelinePos
+
+; Slight hack: Set the 'time since last timeline point' counters back to zero when 'skip effect on spacebar' triggered.
+STZ timeSinceLastChange
+STZ timeSinceLastChange + 1
+
+LDA #25     ; Half a second before you can press space again
+STA spacebarTimer
+
+.postSpacebarProcessing
+.spaceNotPressed
+
+; END 'Spacebar skips to next effect' debugging code.
+
+; Check whether the timeline for this effect has anything to do this frame.
+JSR TickTimeline
+
+; Run any active tasks.
+JSR RunTasks
+
+; Here's we the effect's main 'update' function is kicked off.
+.jumpToFrameUpdate
+jmp &0000				; Patched to target first effect's update function at startup
+.EffectUpdateReturn
+
+; Deliberately waste N (currently only 2) raster-lines' worth of cycles, to give a crude way to speed up or
+; slow down the 'background' tasks.
+; Use this with caution: If your effect code takes a long time to run and you run out of time
+; before the next T1 counter fires indicating vsync occured, then the demo will crash (BRK)
+LDX #2
+.waitForOneLine
+JSR wait128
+DEX
+BNE waitForOneLine
+
+; Update the various 16-bit counters.
+SixteenBitAddConstant frameCountHigh, frameCountLow, 1
+SixteenBitAddConstant timeSinceEffectStart, timeSinceEffectStart + 1, 1
+SixteenBitAddConstant timeSinceLastChange, timeSinceLastChange + 1, 1
+
+; Reset SWR bank to the background processing SWR slot
+LDA EXO_TGT_SWR_bank
+JSR swr_select_slot
+
+; Reset Shadow State to the background processing state
+; But make sure NOT to change the 'rendering from main or shadow' bit (bit 0)
+LDA EXO_TGT_shadow_control
+AND #%11111110    ; mask out bit 0
+STA tempVar
+LDY currentEffectIndex
+LDA shadowStates,Y
+AND #%00000001    ; extract bit 0 (render from main/shadow) from current shadow/main memory state
+ORA tempVar		  ; OR them together, so we have the 'shadow control' state for exo decrunch, but with the 'render main/shadow' bit from current effect
+STA &FE34		  ; ... and write to ACCON!
+
+; Here we return from the interrupt... which will re-enter and continue to run the 'background processing' function.
+.ret2
+; Mark that we're no longer inside the update/render loop, then return to the interrupted code.
+LDX xtmp
+LDY ytmp
+LDA &FC
+STZ withinFrame
+rti
+
+; Expects to have address of an array of 16 bytes provided in A (hi) and Y (lo)
+.SetPalette
+STY palloop + 1
+STA palloop + 2
+LDX #15
+.palloop
+LDA &FFFF,X
+STA &FE21
+DEX
+BPL palloop
+RTS
+
+; Expects to have address of an array of 4 bytes provided in A (hi) and Y (lo)
+; These are: Palette entry for colour indices 0-3 in that order.
+; They should have bits 6 and 4 set to zero. 
+.SetPalette_Mode1
+{
+	STY palloop + 1
+	STA palloop + 2
+	LDX #3
+	.palloop
+	LDA &FFFF,X
+	STA &FE21
+	ORA #%01000000
+	STA &FE21
+	ORA #%00010000
+	STA &FE21
+	AND #%10111111
+	STA &FE21
+	DEX
+	BPL palloop
+	RTS
+}
+
+INCLUDE "core/DelayFunctions.6502"
+INCLUDE "scripting/effectsystem.6502"
+
+taskWorkspaceSize = taskWorkspaceEnd - taskWorkspace
+
+; Palette entries to set all colours to black. This ended up not being used anywhere.
+.paldata_mode1_allblack
+	EQUB &00 + PAL_black, &10 + PAL_black, &20 + PAL_black, &30 + PAL_black
+	EQUB &40 + PAL_black, &50 + PAL_black, &60 + PAL_black, &70 + PAL_black
+	EQUB &80 + PAL_black, &90 + PAL_black, &A0 + PAL_black, &B0 + PAL_black
+	EQUB &C0 + PAL_black, &D0 + PAL_black, &E0 + PAL_black, &F0 + PAL_black
+
+; There now follow a number of palette entries, arranged in such a way that they form several sets of
+; four-colour palettes that are used mostly during the 'Thin Sine' effet to change the look of the images.
+
+.paldata_Mode1_Standard
+EQUB &00 + PAL_black
+EQUB &20 + PAL_red
+EQUB &80 + PAL_yellow
+EQUB &A0 + PAL_white
+.paldata_Mode1_Black
+EQUB &00 + PAL_black
+EQUB &20 + PAL_black
+EQUB &80 + PAL_black
+.paldata_mode1_Minx2TriCol
+EQUB &A0 + PAL_black
+EQUB &00 + PAL_white
+EQUB &20 + PAL_white
+EQUB &80 + PAL_green
+.paldata_mode1_BS1
+EQUB &A0 + PAL_black
+EQUB &80 + PAL_blue
+EQUB &00 + PAL_white
+EQUB &20 + PAL_green
+.paldata_mode1_FlipBlackWhite
+EQUB &00 + PAL_white
+EQUB &20 + PAL_red
+EQUB &80 + PAL_yellow
+.paldata_mode1_Minx2Mono
+EQUB &A0 + PAL_black
+EQUB &00 + PAL_white
+EQUB &20 + PAL_white
+EQUB &80 + PAL_white
+.paldata_mode1_Minx2Final
+EQUB &00 + PAL_blue
+EQUB &20 + PAL_red
+EQUB &80 + PAL_green
+EQUB &A0 + PAL_black
+
+; Standard mode 2 palette entries.
+.paldata_mode2
+EQUB &07, &16, &25, &34, &43, &52, &61, &70
+EQUB &8F, &9E, &AD, &BC, &CB, &DA, &E9, &F8
+
+; Embarassingly, this exact same table already exists above! This is obsolete.
+.paldata_mode2_black
+EQUB &07, &17, &27, &37, &47, &57, &67, &77
+EQUB &87, &97, &A7, &B7, &C7, &D7, &E7, &F7
+
+include "Patterns.6502"
+
+; The task system, that lets you run functions once per frame for specified time periods
+include "scripting/tasksystem.6502"
+
+; Yet another temporary variable used in various places.
+.tempVar SKIP 1
+
+; Library code.
+
+; Routines for dealing with changing Sideways RAM bank etc.
+INCLUDE "core/swr.asm"
+
+; Routines for loaidng from disk
+INCLUDE "core/disksys.asm"
+
+; The timeline system, that readss a bytestrem and decodes it to kick off events at specified timepoints 
+INCLUDE "scripting/timeline.6502"
+
+; Code for controlling the 6845 CRTC
+INCLUDE "core/crtc.6502"
+
+; The music player
+INCLUDE "lib/vgmplayer.asm"
+
+; The 'raw' Exomizer 3 decompressor, that is used to decrunch the music
+INCLUDE "lib/exo_raw.asm"
+
+; The 'targetted' Exomizer 3 decompressor, that is used to decrunch all other data (images, etc)
+INCLUDE "lib/exo_targetted.asm"
+
+; The filenames that will be loaded into the SWR banks and into HAZEL
+.bank0_filename EQUS "Bank0", 13
+.bank1_filename EQUS "Bank1", 13
+.bank2_filename EQUS "Bank2", 13
+.music_filename EQUS "Music", 13
+.hazel_filename EQUS "Hazel", 13
+
+; A that maps from 'timeine function index' as loaded from a timeline bytestream, to the function it triggers.
+.timelineFunctionsHigh
+EQUB HI(SwapToEffect)
+EQUB HI(SetTimelineBank)
+EQUB HI(beginTask)
+EQUB HI(startDecrunch)
+EQUB HI(SetZeroPageValue8bit)
+EQUB HI(SetZeroPageValue16bit)
+EQUB HI(SetValue8bit)
+EQUB HI(SetValue16bit)
+EQUB HI(SetValuesRange)
+EQUB HI(SetZPFlag)
+EQUB HI(DoNothing)
+EQUB HI(TL_SetPaletteMode1)
+EQUB HI(TL_SetPaletteMode2)
+
+.timelineFunctionsLow
+EQUB LO(SwapToEffect)
+EQUB LO(SetTimelineBank)
+EQUB LO(beginTask)
+EQUB LO(startDecrunch)
+EQUB LO(SetZeroPageValue8bit)
+EQUB LO(SetZeroPageValue16bit)
+EQUB LO(SetValue8bit)
+EQUB LO(SetValue16bit)
+EQUB LO(SetValuesRange)
+EQUB LO(SetZPFlag)
+EQUB LO(DoNothing)
+EQUB LO(TL_SetPaletteMode1)
+EQUB LO(TL_SetPaletteMode2)
+
+.timelineFunctionsTableEnd
+
+ASSERT (timelineFunctionCount * 2) = (timelineFunctionsTableEnd - timelineFunctionsHigh)
+
+; ******************************************************************
+; *	End address to be saved
+; ******************************************************************
+.mainEnd
+
+; Save main code/data
+SAVE "Main", mainStart, mainEnd, start
+
+; ******************************************************************
+; *	Save the sideways RAM code / data
+; ******************************************************************
+
+HAZEL_START = &C000
+HAZEL_TOP = &E000
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+ORG &8000
+GUARD HAZEL_START
+
+.bank0_start
+ALIGN &100
+include "effects/TestBarEffects.6502"
+include "effects/BSLogoIntro.6502"
+include "effects/TitleScreen.6502"
+include "effects/Outro.6502"
+.TitleScreen
+INCBIN "intermediate/WaveRunner.exo"
+.Presents2Screen
+INCBIN "intermediate/Presents2.exo"
+.Minx
+INCBIN "intermediate/Minx.exo"
+.Minx2b
+INCBIN "intermediate/Minx2b.exo"
+.Minx2c
+INCBIN "intermediate/Minx2c.exo"
+.BitShift1
+INCBIN "intermediate/BitShift1.exo"
+.BitShift2
+INCBIN "intermediate/BitShift2.exo"
+.BS_logo_uniquelines_start
+INCBIN "intermediate/bs-logo-uniquelines.exo"
+.BS_logo_start_and_end_lines
+INCBIN "intermediate/start-and-end-lines.exo"
+.bank0_end
+SAVE "Bank0", bank0_start, bank0_end
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+CLEAR 0, &FFFF
+ORG &8000
+GUARD HAZEL_START
+
+.bank1_start
+ALIGN &100
+include "effects/SineEffects.6502"
+ALIGN &100
+include "effects/Scrolltext/Scrolltext.6502"
+.BitShift2b
+INCBIN "intermediate/BitShift2b.exo"
+.bank1_end
+SAVE "Bank1", bank1_start, bank1_end
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+CLEAR 0, &FFFF
+ORG &8000
+GUARD HAZEL_START
+
+.bank2_start
+SLOT_BLOBS=SLOT_BANK2
+include "effects/blobs.6502"
+SLOT_CHEQ=SLOT_BANK2
+include "effects/cheq.6502"
+SLOT_CHEQ_FONT=SLOT_BANK2
+include "effects/cheq_font.6502"
+SLOT_PR=SLOT_BANK2
+include "effects/prerendered.6502"
+brk
+.Outro
+INCBIN "intermediate/Outro.exo"
+.Goodbye
+INCBIN "intermediate/Goodbye.exo"
+.Black
+INCBIN "intermediate/Black.exo"
+.bank2_end
+SAVE "Bank2",bank2_start,bank2_end
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+CLEAR 0, &FFFF
+
+ORG &8000
+GUARD HAZEL_TOP
+.music_start
+
+; ******************************************************************
+; *	MUSIC BANK = SWRAM + HAZEL
+; ******************************************************************
+
+ALIGN &100
+.music_data
+INCBIN "intermediate/MAIN.exo"
+.music_end
+
+SAVE "Music", music_start, HAZEL_START
+SAVE "Hazel", HAZEL_START, music_end
+
+bank0_size = bank0_end - bank0_start
+bank0_free = HAZEL_START - bank0_end
+
+bank1_size = bank1_end - bank1_start
+bank1_free = HAZEL_START - bank1_end
+
+bank2_size = bank2_end - bank2_start
+bank2_free = HAZEL_START - bank2_end
+
+music_size = music_end - music_start
+music_free = HAZEL_TOP - music_end - 156 ; 156 bytes is for targetted exo unpack buffer, at end of Hazel
+
+main_size = mainEnd - mainStart
+main_free = effect_workspace_base_addr - mainEnd
+
+total_free = bank0_free + bank1_free + bank2_free + music_free + main_free
+
+PRINT "------"
+PRINT "BANK 0 SIZE: ", ~bank0_size, " (", bank0_size, " bytes)"
+PRINT "BANK 0 FREE: ", ~bank0_free, " (", bank0_free, " bytes)"
+PRINT "------"
+PRINT "BANK 1 SIZE: ", ~bank1_size, " (", bank1_size, " bytes)"
+PRINT "BANK 1 FREE: ", ~bank1_free, " (", bank1_free, " bytes)"
+PRINT "------"
+PRINT "BANK 2 SIZE: ", ~bank2_size, " (", bank2_size, " bytes)"
+PRINT "BANK 2 FREE: ", ~bank2_free, " (", bank2_free, " bytes)"
+PRINT "------"
+
+
+
+; ******************************************************************
+; *	MUSIC INFO
+; ******************************************************************
+
+PRINT "------"
+PRINT "MUSIC BANK"
+PRINT "------"
+PRINT "MUSIC SIZE = ", ~music_size, " (", music_size, " bytes)"
+PRINT "------"
+PRINT "MUSIC FREE =", ~music_free, " (", music_free, " bytes)"
+
+PRINT "------"
+PRINT "MAIN SIZE: ", ~main_size, " (", main_size, " bytes)"
+PRINT "MAIN FREE: ", ~main_free, " (", main_free, " bytes)"
+PRINT "------"
+
+
+PRINT "TOTAL FREE: ", ~total_free, " (", total_free, " bytes)"
+
+PUTBASIC "basic/loader.bas", "WaveRnr"

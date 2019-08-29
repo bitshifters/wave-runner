@@ -1,0 +1,78 @@
+;*************************************
+; A number of definitions for ULA palette register values / palette control in general.
+;
+;*************************************
+
+PAL_black	= (0 EOR 7)
+PAL_blue	= (4 EOR 7)
+PAL_red		= (1 EOR 7)
+PAL_magenta = (5 EOR 7)
+PAL_green	= (2 EOR 7)
+PAL_cyan	= (6 EOR 7)
+PAL_yellow	= (3 EOR 7)
+PAL_white	= (7 EOR 7)
+
+col0ToBlack    = &00 + PAL_black
+col0ToBlue     = &00 + PAL_blue
+col0ToRed      = &00 + PAL_red
+col0ToMagenta  = &00 + PAL_magenta
+col0ToGreen    = &00 + PAL_green
+col0ToYellow   = &00 + PAL_yellow
+col0ToCyan     = &00 + PAL_cyan
+col0ToWhite    = &00 + PAL_white
+
+col1ToBlack    = &10 + PAL_black
+col1ToBlue     = &10 + PAL_blue
+col1ToRed      = &10 + PAL_red
+col1ToMagenta  = &10 + PAL_magenta
+col1ToGreen    = &10 + PAL_green
+col1ToYellow   = &10 + PAL_yellow
+col1ToCyan     = &10 + PAL_cyan
+col1ToWhite    = &10 + PAL_white
+
+col2ToBlack    = &20 + PAL_black
+col2ToBlue     = &20 + PAL_blue
+col2ToRed      = &20 + PAL_red
+col2ToMagenta  = &20 + PAL_magenta
+col2ToGreen    = &20 + PAL_green
+col2ToYellow   = &20 + PAL_yellow
+col2ToCyan     = &20 + PAL_cyan
+col2ToWhite    = &20 + PAL_white
+
+col3ToBlack    = &30 + PAL_black
+col3ToBlue     = &30 + PAL_blue
+col3ToRed      = &30 + PAL_red
+col3ToMagenta  = &30 + PAL_magenta
+col3ToGreen    = &30 + PAL_green
+col3ToYellow   = &30 + PAL_yellow
+col3ToCyan     = &30 + PAL_cyan
+col3ToWhite    = &30 + PAL_white
+
+col4ToBlack    = &40 + PAL_black
+col4ToBlue     = &40 + PAL_blue
+col4ToRed      = &40 + PAL_red
+col4ToMagenta  = &40 + PAL_magenta
+col4ToGreen    = &40 + PAL_green
+col4ToYellow   = &40 + PAL_yellow
+col4ToCyan     = &40 + PAL_cyan
+col4ToWhite    = &40 + PAL_white
+
+col5ToBlack    = &50 + PAL_black
+col5ToBlue     = &50 + PAL_blue
+col5ToRed      = &50 + PAL_red
+col5ToMagenta  = &50 + PAL_magenta
+col5ToGreen    = &50 + PAL_green
+col5ToYellow   = &50 + PAL_yellow
+col5ToCyan     = &50 + PAL_cyan
+col5ToWhite    = &50 + PAL_white
+
+colFToBlack    = &F0 + PAL_black
+colFToBlue     = &F0 + PAL_blue
+colFToRed      = &F0 + PAL_red
+colFToMagenta  = &F0 + PAL_magenta
+colFToGreen    = &F0 + PAL_green
+colFToYellow   = &F0 + PAL_yellow
+colFToCyan     = &F0 + PAL_cyan
+colFToWhite    = &F0 + PAL_white
+
+

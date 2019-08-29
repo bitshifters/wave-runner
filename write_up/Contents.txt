@@ -1,0 +1,23 @@
+Introduction
+
+NOP slides and Clockslides
+
+Demo Framework Overview
+
+Double Sine Wave Effect
+
+BitShifters Logo Dissolve Effect
+
+Intro and Outro Images
+
+Vertical Scrolltext Effect
+
+'Blobs' Effect
+
+Chequerboard Effect
+
+Closing thoughts / miscellany
+
+
+
+

@@ -1,0 +1,19 @@
+\ ******************************************************************
+\ *	sin table
+\ ******************************************************************
+
+ALIGN &100	; so we don't incur page-crossed penalties
+.sintable
+FOR n, 0, 255
+	EQUB (SIN(n/128*PI) * scrolltextWaveSize) + scrolltextWaveSize
+NEXT
+
+ALIGN &100
+.sintableThin
+; TODO: This is stepping down from -7:7 to -6:6 to -5:5 ... to 0:0. But could also do half-increments?
+FOR variableSmallWaveSize, 0, sineWibbleWaveSize * 2
+FOR n, 0, 255
+	EQUB (SIN(n/128*PI) * (variableSmallWaveSize * 0.5) ) + (variableSmallWaveSize * 0.5)
+NEXT
+NEXT
+.sintableThinEnd

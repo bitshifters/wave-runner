@@ -1,0 +1,297 @@
+\ ******************************************************************
+\ *	The entry point of the demo
+\ ******************************************************************
+
+.start
+	\\ Set up hardware state and interrupts
+	LDX #&FF:TXS				; reset stack
+
+	; Load stuff into appropriate SWR banks
+	LDA #SLOT_BANK0:JSR swr_select_slot
+	LDA #HI(bank0_start)
+	LDX #LO(bank0_filename)
+	LDY #HI(bank0_filename)
+	JSR disksys_load_file
+
+	LDA #SLOT_BANK1:JSR swr_select_slot
+	LDA #HI(bank1_start)
+	LDX #LO(bank1_filename)
+	LDY #HI(bank1_filename)
+	JSR disksys_load_file
+
+	lda #SLOT_BANK2:jsr swr_select_slot
+	lda #hi(bank2_start)
+	ldx #lo(bank2_filename)
+	ldy #hi(bank2_filename)
+	jsr disksys_load_file
+
+	LDA #SLOT_MUSIC:JSR swr_select_slot
+	LDA #HI(music_start)
+	LDX #LO(music_filename)
+	LDY #HI(music_filename)
+	JSR disksys_load_file
+
+	; (HAZEL contains the remainder of the compressed music stream.)
+	LDA #HI(HAZEL_START)
+	LDX #LO(hazel_filename)
+	LDY #HI(hazel_filename)
+	JSR disksys_load_file
+
+	; Calling mainStart immediately RTSs back to here, it was put in for debugging purposes
+	; (so we could use B2's tracing features).
+	jsr mainStart
+
+	; Set up our break handler.
+	lda #lo(brk_handler):sta brkv+0
+	lda #hi(brk_handler):sta brkv+1
+
+	lda #200:ldx #3:ldy #0:jsr $fff4
+
+	; FROM THIS POINT ON THE OS IS TURNED OFF!
+
+    SEI
+
+    \\ Set up System Via for reading from keyboard.
+    \\ (taken from http://www.retrosoftware.co.uk/wiki/index.php?title=Reading_the_keyboard_by_direct_hardware_access)
+    
+    \\ set the Data Direction Register A [of SysVia] to specify that the bottom 7 bits are outputs, and the top bit is an input. Hence: 
+;    .StartupSetupForKeyboardRead
+   ; LDA #&7F:STA &FE43
+   LDA #&0F:STA &FE42   \ allow write to addressable latch
+   ; LDA #&03:STA &FE40   \ set bit 3 to 0
+
+
+	; TAKEN FROM TWISTED BRAIN
+
+	LDA #&7F					; A=01111111
+	STA &FE4E					; R14=Interrupt Enable (disable all interrupts)
+	STA &FE43					; R3=Data Direction Register "A" (set keyboard data direction)
+	LDA #&C2					; A=11000010
+	STA &FE4E					; R14=Interrupt Enable (enable main_vsync and timer interrupt)
+
+	; END TAKEN FROM TB
+
+	.clearZeroPage
+	LDX #0
+{
+	.loop
+	STZ 0,X
+	DEX
+	BNE loop
+}
+
+	jsr InitDisplay
+
+	; Prime the music playback system.
+	LDX #LO(music_data)
+	LDY #HI(music_data)
+	JSR vgm_init_stream
+
+    .StartupSetupEffectAddresses
+	; TODO: The below two could be combined into one fn.
+	JSR SetupTimelineCounterAddresses
+    JSR EffectDeclaration
+
+	; Restore memory stream reader for timeline...
+	; This is ugly. Need a cleaner way of setting up the state (e.g. stream reader state) for the first effect.
+	StoreMemoryStreamReaderState timelineBankAddress, timelinePos
+
+	JSR clearScreen
+
+; Enable vsync interrupt before we jump to the sync code. Not sure whether this is necessary. If the sysVia vsync interrupt is
+; disabled, can you still read the interrupt flags register and check the vsync flag, or is it never set?
+
+; Disable ALL interrupts on both user and system via... (We will re-enable the SysVia Timer1 interrupt in a moment)
+; &7F == 0b01111111 == "Bit 7 is clear, which means all other bits which are set DISABLE that interrupt.
+; All other bits set so disable all interrupts"
+.DisableAllInterrupts
+lda #&7F
+sta sysViaStart + viaReg_InterruptEnable
+sta userViaStart + viaReg_InterruptEnable
+
+; Clear all existing interrupt flags!
+.clearAllIRQs
+lda #1
+.clearFlag
+sta sysViaStart + viaReg_InterruptFlags
+ASL A
+cmp #&80
+bne clearFlag
+
+; same thing for the user via
+lda #1
+.clearFlag2
+sta userViaStart + viaReg_InterruptFlags
+ASL A
+cmp #&80
+bne clearFlag2
+
+
+.enableT1OnSysVia
+lda #viaBit_IER_T1
+; You need bit 7 ("set/clear") set otherwise you'd be disabling the T1 interrupt and enabling all the others!
+ora #viaBit_IER_SetClear
+sta sysViaStart + viaReg_InterruptEnable
+; timer1 continuous interrupts
+.SysViaContinuous
+lda #&40
+sta sysViaStart + viaReg_AuxControl
+
+
+; Disable userVia all interrupts...
+; lda #viaBit_IER_SetClear
+lda #&7F
+sta userViaStart + viaReg_InterruptEnable
+
+.jumpToSync
+jsr sync
+
+; 312 lines by 64 us (128 cycles) per line, minus 2 owing to some kind of delay when latching the timer.
+FramePeriod = 312*64-2
+
+.setInitialTimerValue
+; The timer value below below is the one to adjust when you need to change when the update/render loop starts with
+; respect to the vsync.
+lda #&94
+sta sysViaStart + viaReg_T1CounterLow
+lda #&4F
+sta sysViaStart + viaReg_T1CounterHigh
+
+.setirq1v
+lda #beginFrame_irq MOD256
+sta irq1v
+lda #beginFrame_irq DIV256
+sta irq1v+1
+
+.SetFramePeriod
+lda #LO(FramePeriod):STA sysViaStart + viaReg_T1LatchLow
+lda #HI(FramePeriod):STA sysViaStart + viaReg_T1LatchHigh
+
+cli
+
+; Enter infinite loop which is interrupted by the timer when we want to 'do stuff' every frame.
+; This loop is either decrunching, or just looping back on itself over and over, or clearing the screen
+; TODO: Upgrade this so arbitrary functions can be run in background, with arguments passed to them from timelne
+.background_processing
+LDX clearScreenRequested
+BNE ClearScreenDispatcher
+.clearScreenDone
+LDA EXO_TGT_request_pending
+BEQ background_processing
+LDA EXO_TGT_is_decrunching
+BNE background_processing
+LDA #0
+STA EXO_TGT_request_pending
+LDA EXO_TGT_SWR_bank
+JSR swr_select_slot
+LDA EXO_TGT_shadow_control
+STA &FE34
+LDX EXO_TGT_request_address_lo
+LDY EXO_TGT_request_address_hi
+LDA #1
+STA EXO_TGT_is_decrunching
+lda frameCountLow:sta EXO_TGT_decrunch_start_frameCount+0
+lda frameCountHigh:sta EXO_TGT_decrunch_start_frameCount+1
+JSR EXO_TGT_decrunch
+sec
+lda frameCountLow:sbc EXO_TGT_decrunch_start_frameCount+0:sta EXO_TGT_last_decrunch_num_frames+0
+lda frameCountHigh:sbc EXO_TGT_decrunch_start_frameCount+1:sta EXO_TGT_last_decrunch_num_frames+1
+LDA #0
+;STA EXO_TGT_request_pending
+STA EXO_TGT_is_decrunching
+BRA background_processing
+
+; Flag which is set to 1 (typically by the timeline system) when we want the screen cleared. The 'background processing'
+; code above will pick it up as soon as it is 'free' (ie not decrunching) and then clear the screen in the background.
+.clearScreenRequested
+EQUB 0
+
+.ClearScreenDispatcher
+{
+	; Dispatch using table!
+	LDA clearFunctionsHigh-1,X
+	STA dispatchTarget + 2
+	LDA clearFunctionsLow-1,X
+	STA dispatchTarget + 1
+	.dispatchTarget
+	JSR clearScreen
+	STZ clearScreenRequested
+	BRA clearScreenDone
+}
+
+; Clear function indexing starts from 1 because zero indicates "clear is finisehd / not currently in progress"
+cf_setByte = 1
+cf_clearUsingMask = 2
+cf_setUsingMask = 3
+
+.clearFunctionsHigh
+EQUB HI(clearScreen)
+EQUB HI(ClearScreenUsingMask)
+EQUB HI(SetScreenUsingMask)
+
+.clearFunctionsLow
+EQUB LO(clearScreen)
+EQUB LO(ClearScreenUsingMask)
+EQUB LO(SetScreenUsingMask)
+
+include "core/screenClearing.6502"
+
+.InitDisplay
+{
+\\ See MasRef1 F.2-3
+lda #$08:tsb $fe34				; Y=1: page in HAZEL
+lda #$04:trb $fe34				; X=0: $3000-$7fff = normal RAM
+lda #$02:trb $fe34				; E=0: $3000-$7fff = no special
+								; handling for MOS code
+lda #$01:trb $fe34				; D=0: CRTC displays main RAM
+
+\\ Set up CRTC for MODE 1
+
+LDX #13
+.crtcloop
+STX &FE00
+\\	LDA crtcregs,X
+LDA crtcregs_mode1,X
+STA &FE01
+DEX
+BPL crtcloop
+
+\\ Set up video ULA for MODE 2
+\\LDA #&F4
+
+\\ Set up ULA for Mode 1
+LDA #&D8
+STA &FE20
+
+\\ Ensure the CRTC column counter is incrementing starting from a
+\\ known state with respect to the cycle stretching. Because the vsync
+\\ signal is reported via the VIA, which is a 1MHz device, the timing
+\\ could be out by 0.5 usec in 2MHz modes.
+\\
+\\ To fix: set R0=0, wait 256 cycles to ensure the horizontal counter
+\\ is stuck at 0, then set the horizontal counter to its correct
+\\ value. The 6845 is always accessed at 1MHz so the cycle counter
+\\ starts running on a 1MHz boundary.
+\\
+\\ Note: when R0=0, DRAM refresh is off. Don't delay too long.
+stz $fe00:stz $fe01
+jsr wait128
+jsr wait128
+stz $fe00:lda crtcregs_mode1+0:sta $fe01
+
+\\ Set up palette for MODE 1
+LDA #HI(paldata_Mode1_Standard)
+LDY #LO(paldata_Mode1_Standard)
+
+JSR SetPalette_Mode1
+rts
+}
+
+.brk_handler
+{
+; just stow this stuff somewhere it can be retrieved from BASIC.lv
+lda $fd:sta $70
+lda $fe:sta $71
+lda $f4:sta $72
+jmp ($fffc)
+}

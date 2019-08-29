@@ -1,0 +1,11 @@
+Wave Runner Demo Details
+
+In a similar manner to Kieran's Twisted Brain write-up last year, I'm going to describe how Wave Runner works under the hood, as well as providing some insight into its genesis and how it was put together.
+
+I don't have a vast amount of free time, but am hoping to get all the parts written over the next few weeks. I'll block out a number of posts for the stuff I want to talk about, and fill them in as and when they're ready. Several parts of the demo were done by Tom Seddon and hopefully he'll have some time to describe his effects as well, so I'll block out parts for those as well.
+
+Without further ado, before we get too technical let's start with some background details!
+
+Demo timeline
+
+Believe it or not the demo started out back in August 2018 (suspiciously, shortly after Twisted Brain was released...!) as an attempt to learn 6502 assembly. Kieran got me interested in the BBC Demo Scene and I decided that I was going to learn 6502 coding and see whether I could come up with some interesting effects. Throughout 

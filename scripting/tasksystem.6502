@@ -1,0 +1,302 @@
+; The Task System is ticked once per frame. It is responsible for running through an array of tasks and, for each one that is
+; 'active' (ie its counter has not reached zero) it calls a function to 'tick' the task itself, and decrements the task's counter.
+; Tasks are typically spawned either by the timeline system, or by other effects which wish to spawn them (currently only
+; the vertical scrolltext spawns tasks).
+
+; This file also contains a few simple tasks functions. Many more could be written!
+
+\\ Find first task slot whose counter has reached zero.
+\\ Returns X: Index of found task slot (and -ve flag will be clear). If no free slot found, X = &FF (and -ve flag set)
+\\ Returns A: 0 if free slot was found. Non-zero if all slots still occupied with running tasks.
+\\ Y is unchanged
+.FindFreeTaskSlot
+{
+	LDX #maxTaskIndex				\\ Task index. Decremented by one each time through loop.
+	.loop
+	LDA taskLoopCountersHigh,X \\ Load task's current loop counter MSB value -> A.
+	BNE moveToNextTask	\\ If it was non-zero, go to next task, because this task has not yet finished.
+	LDA taskLoopCountersLow,X \\ Load task loop counter LSB -> A
+	BEQ end				\\ If we found a task whose loop counter has reached zero, immediately return.
+
+	\\ Move to next task
+	.moveToNextTask
+	DEX
+	BPL loop
+	.end
+	RTS
+}
+
+.RunTasks
+\\ Run through each task slot. For each one, if its counter is non-zero,
+\\ then call the task fn (with Y set to task index)
+\\ All task fns must preserve Y but can change A and X
+{
+	LDY #maxTaskIndex
+	.loop
+
+	\\ Check task loop counter. If high and low are both zero, do NOT decrememt counter or call task fn, just go
+	\\ straight to afterTaskCall
+	LDA taskLoopCountersHigh,Y
+	BNE decrementTaskLoopCounterAndCallTask
+	LDA taskLoopCountersLow,Y
+	BEQ afterTaskCall
+
+	.decrementTaskLoopCounterAndCallTask
+	{
+		\\ 16-bit subtract of 1 from task loop counter
+		SEC
+		LDA taskLoopCountersLow,Y
+		SBC #1			
+		STA taskLoopCountersLow,Y
+		BCS noCarry
+		LDA taskLoopCountersHigh,Y
+		SBC #1
+		STA taskLoopCountersHigh,Y
+		.noCarry
+	}
+
+	{
+		; Call the task!
+		LDA taskFnPtrsHigh,Y
+		STA jumpTarget+2
+		LDA taskFnPtrsLow,Y
+		STA jumpTarget+1
+		.jumpTarget
+		JSR &FFFF
+	}
+
+	.afterTaskCall
+	DEY			\\ Decrememt task index, so it counts down from maxTaskIndex to 0...
+	BPL loop	\\ Once it goes below zero (ie wraps round to &FF) then fall through to end of function.
+	RTS
+}
+
+
+; "Start Decrunch" control code:
+; Args:
+; Decrunch buffer start address (two bytes)
+; SWR bank (bits 0-3) + shadow/main RAM flag (in bit 4) (one byte)
+
+.startDecrunch
+    LDY memoryReaderOffset
+    INY
+    LDA (memoryReaderBasePtrAddress),Y
+	STA EXO_TGT_request_address_hi
+	INY
+	LDA (memoryReaderBasePtrAddress),Y
+	STA EXO_TGT_request_address_lo
+	INY
+	LDA (memoryReaderBasePtrAddress),Y
+	STA EXO_TGT_SWR_bank
+	AND #%00010000 ; Extract 5th and 6th most signif. bit (bit 4 and 5)
+	; ... bit 4 becomes bit 2, which is the position of the "shadow or main ram" bit in SHEILA FE34
+	; ... bit 5 becomes bit 3 -- Hazel active or not -- and should always be set to 1.
+	; Actually let's not require everyone to set bit 5. Just OR it in here.
+	LSR A
+	LSR A
+	ORA #%00001000
+	STA EXO_TGT_shadow_control
+	LDA #1
+	STA EXO_TGT_request_pending
+    INY
+    STY memoryReaderOffset
+	RTS
+
+
+; "Begin Task" control code:
+; Args:
+; Task fn address (two bytes)
+; Initial loop value (two bytes)
+; Byte count to copy to task block
+; (Up to <taskWorkspaceSize> byte values)
+
+.beginTask
+{
+    PHX
+    ; TODO HERE...
+    ; 1. Find free task slot N, (or BRK if no slots free?)
+    ; 2.  Read task address (two bytes), put into task N's fn ptr
+    ; 3. Read loop start value (two bytes), put into task N's loop counter
+    ; 4. Read byte count of number of arguments.
+    ; 5. Put (byte count) bytes into task data block for task N.
+    JSR FindFreeTaskSlot
+    BPL slotFound ; If couldn't find slot, die, otherwise branch to slotFound
+    BRK
+    .slotFound
+    ; If here, then X contains an index of a free task slot
+    LDY memoryReaderOffset
+    INY
+    LDA (memoryReaderBasePtrAddress),Y
+    STA taskFnPtrsHigh,X
+    INY
+    LDA (memoryReaderBasePtrAddress),Y
+    STA taskFnPtrsLow,X
+    INY
+    LDA (memoryReaderBasePtrAddress),Y
+    STA taskLoopCountersHigh,X
+    INY
+    LDA (memoryReaderBasePtrAddress),Y
+    STA taskLoopCountersLow,X
+    INY
+    LDA (memoryReaderBasePtrAddress),Y ; Load count of bytes that we must move into task block -> A
+    STA tempVarZP
+	CLC		; Clear carry here instead of inside the loop below, because it should never end up set, because the
+			; max no. of tasks times the size of a task block should never be > 255.
+    .taskDataBytesLoop
+    BEQ endl
+    INY
+    LDA (memoryReaderBasePtrAddress),Y
+    STA taskBlocks,X
+    TXA
+    ADC #maxTasks
+    TAX
+    DEC tempVarZP
+    BRA taskDataBytesLoop
+    .endl
+    INY
+    STY memoryReaderOffset
+    PLX
+    RTS
+}
+
+.StopAllTasks
+{
+	LDX #maxTaskIndex
+	.taskLoop
+	STZ taskLoopCountersHigh,X
+	STZ taskLoopCountersLow,X
+	DEX
+	BPL taskLoop
+	.done
+	RTS
+}
+
+
+\\ Task: "Add 16 bit constant to address"
+
+\\ Add 16-bit constant to 16-bit target. Target's address is on ZP, hence representable in one byte
+.AddConstant_16
+; Arguments:
+; 0: ZP address of target (which must be stored LSB-first, ie LSB at LOWER memory address)
+; 1: LSB of value to add
+; 2: MSB of value to add
+{
+	LDX taskBlocks,Y	; Load ZP address of target to X
+	LDA 0,X				; Load LSB of target -> A
+	CLC
+	ADC taskBlocks + maxTasks,Y	\\ Add LSB of value to LSB of target value
+	STA 0,X				; Store LSB back to target value
+	LDA 1,X				; Load MSB of target value
+	ADC taskBlocks + maxTasks * 2,Y		; Add MSB of value to MSB of target value
+	STA 1,x				; Store MSB back to target value
+	RTS
+}
+
+; Add 16-bit constant to 16-bit target on ZP. Then once task is done (ie once task loop counter
+; has reached zero) set the target to a final value.
+.AddConstantThenSetFinal_16
+; Arguments:
+; 0: ZP address of target (which must be stored LSB-first, ie LSB at LOWER memory address)
+; 1: LSB of value to add
+; 2: MSB of value to add
+; 3: LSB of final value
+; 4: MSB of final value
+{
+	; First check: Is this the final loop for the task?
+	LDA taskLoopCountersHigh,Y	; Check task loop counter MSB
+	BNE notFinalLoop			
+	LDA taskLoopCountersLow,Y	; Check task loop counter LSB
+	BNE notFinalLoop			
+	.finalLoop			; This is final loop. Set target to constant in offset3 and offset4
+	LDX taskBlocks,Y	; Load ZP address of target to X
+	LDA taskBlocks + maxTasks * 3,Y	; Load LSB of value that target is to be set to...
+	STA 0,X		; ... and store it to LSB of target
+	LDA taskBlocks + maxTasks * 4,Y	; Load MSB of value that target is to be set to...
+	STA 1,X		; ... and store it to MSB of target
+	RTS
+	.notFinalLoop		; This isn't final loop. Add constant from offset1 and offset2
+	BRA AddConstant_16	; AddConstant_16 will call RTS for us
+}
+
+\\ Set 16-bit target (on ZP) to specified amount
+.SetTarget_16
+; Arguments:
+; 0: ZP address of target.
+; 1: First byte of value to set. Target address gets set to this value.
+; 2: Second byte of value to set. Target addres + 1 gets set to this value.
+{
+	LDX taskBlocks,Y	; Load ZP address of target to X
+	LDA taskBlocks + maxTasks,Y	; Load LSB of value that target is to be set to...
+	STA 0,X		; ... and store it to LSB of target
+	LDA taskBlocks + maxTasks * 2,Y	; Load MSB of value that target is to be set to...
+	STA 1,X		; ... and store it to MSB of target
+	RTS
+}
+
+; Copy bytes from one table to another, using a separate table to determine which index into the table to copy each frame.
+.CopyData
+; Arguments:
+; 0: MSB of source table address
+; 1: LSB of source table address
+; 2: MSB of dest table address
+; 3: LSB of source table address
+; 4: Start index in table of indices
+; 5: Index increment per frame
+{
+	LDA taskBlocks,Y ; MSB of src address
+	STA loadSrc + 2
+	LDA taskBlocks + maxTasks,Y ; LSB of src address
+	STA loadSrc + 1
+	LDA taskBlocks + maxTasks * 2,Y ; MSB of dst address
+	STA storeDest + 2
+	LDA taskBlocks + maxTasks * 3,Y ; LSB of dst address
+	STA storeDest + 1
+	LDX taskBlocks + maxTasks * 4,Y ; start index (current index)
+	PHX
+	.^copyDataIndicesAddress
+	LDA randomTable,X
+	TAX
+.loadSrc
+	LDA &FFFF,X
+.storeDest
+	STA &FFFF,X
+	PLA
+	CLC
+	ADC taskBlocks + maxTasks * 5,Y ; increment index into indices table
+	STA taskBlocks + maxTasks * 4,Y ; Store the index again
+	RTS
+}
+
+
+; Alternate a target on ZP between two different 8-bit values
+; Values will swap every <period> frames (max 255)
+; 0: ZP address of target.
+; 1: Period
+; 2: Starting value for counter
+; 3: Value 1
+; 4: Value 2 
+.AlternateBetweenTwoValues_8
+{
+	LDX taskBlocks + maxTasks * 2,Y	; Load periodic counter to X
+	DEX								; Decrement the periodic counter
+	STX taskBlocks + maxTasks * 2,Y	; Store the new counter value back again
+	BNE done	; If it didn't hit zero, exit early
+	; If code execution reaches here, we have to reset the counter to period, then swap the target with the other value
+	LDX taskBlocks + maxTasks,Y		; Load periodicity
+	STX taskBlocks + maxTasks * 2,Y	; Store periodicity to counter (ie reset counter)
+
+	; Now on to swapping the value...
+	LDX taskBlocks,Y	; Load ZP address of target to X
+
+	LDA taskBlocks + maxTasks * 3,Y ; Load value 1 -> A
+	CMP 0,X							; Is the CURRENT value equal to Value1?
+	BEQ loadValue2
+	; If code execution gets here, then current value does NOT equal Value1, so we set it to value1
+	STA 0,X		; Value1 already in A, so can just store it immediately
+	BRA done	; ... and jump to end
+	.loadValue2		
+	LDA taskBlocks + maxTasks * 4,Y ; Load value 2 -> A
+	STA 0,X		; ... and store it into target
+.done
+	RTS
+}

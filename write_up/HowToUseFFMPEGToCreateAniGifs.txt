@@ -1,0 +1,1 @@
+c:\tools\ffmpeg\bin\ffmpeg.exe -i VidCombined.mp4 -f gif -vf scale=iw*0.5:-1 Vid12CombScaled.gif

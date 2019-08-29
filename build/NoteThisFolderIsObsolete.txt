@@ -1,0 +1,2 @@
+This folder contains some early Powershell scripts that were used to build parts of the demo
+but were then obsoleted by the move to the makefile-based build system.
