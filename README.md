@@ -5,7 +5,7 @@ to eventually become Wave Runner.
 
 # Build BSNova19.ssd
 
-Build on Windows or OS X. (It should work on inux too, but Mono wouldn't run the
+Build on Windows or OS X. (It should work on Linux too, but Mono wouldn't run the
 .NET EXEs when I tried, for reasons not entirely clear...)
 
 ## Windows dependencies
@@ -25,7 +25,7 @@ All additional dependencies are included.
   Makefile assumes it's on the PATH and called `exomizer2`
 * [Exomizer v3.0.2](https://bitbucket.org/magli143/exomizer/wiki/Home) -
   grab the 3.0.2 zip and build. Makefile assumes it's on the PATH and
-  called `exomizer`
+  called `exomizer3`
 * [BeebAsm](https://github.com/stardot/beebasm) - follow repo
   instructions to build. Makefile assumes it's on the PATH and called
   `beebasm`
@@ -43,7 +43,7 @@ executables:
 
 * `PYTHON=` for Python (default: `python`)
 * `BEEBASM` for BeebAsm (default: `beebasm`)
-* (OS X) `EXOMIZER3` for Exomizer v3 (default: `exomizer`)
+* (OS X) `EXOMIZER3` for Exomizer v3 (default: `exomizer3`)
 * (OS X) `EXOMIZER2` for Exomizer v2 (default: `exomizer2`)
 * (OS X) `MONO` for Mono (default: `mono`)
 
@@ -56,11 +56,11 @@ next time.
 
 # Build tools
 
-Build on Windows.
+The build uses three C# command-line tools named FontExtractor, ImageAnalyser and RasterGen. These can be built on Windows or MacOS using Visual Studio. They are simple .Net executables with no third-party dependencies and should be portable between OSs.
 
-## Windows dependencies
+## Tools needed to build the command-line tools
 
-* Visual Studio 2017
+* Visual Studio 2019
 
 ## Build process
 
@@ -68,4 +68,4 @@ Load `tools\Tools.sln` into Visual Studio.
 
 Build.
 
-Commit new EXEs/DLLs after changing - they are part of the repo.
+Commit new EXEs after changing - they are part of the repo.
