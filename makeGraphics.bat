@@ -1,5 +1,5 @@
 @echo off
-if "%PYTHON%"=="" set PYTHON=C:\Python27\python.exe
+if "%PYTHON%"=="" set PYTHON=py -3
 
 %PYTHON% bin/png2bbc.py --quiet -o build/bh_pic.dat --palette 7130 ./graphics/bh.png 1
 %PYTHON% bin/png2bbc.py -o build/sgpic.dat --palette 4130 ./graphics/StarGliderTest.png 1

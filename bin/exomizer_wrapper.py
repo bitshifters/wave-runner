@@ -1,5 +1,5 @@
 #!/usr/bin/python
-import os,os.path,hashlib,argparse,subprocess,sys,pipes
+import os,os.path,hashlib,argparse,subprocess,sys,shlex
 
 ##########################################################################
 ##########################################################################
@@ -60,7 +60,7 @@ def exo(options):
     info_path='%s.info.txt'%os.path.splitext(options.output_path)[0]
     try:
         with open(info_path,'rt') as f: old_info_text=f.read().strip()
-    except IOError,e: pass
+    except IOError as e: pass
 
     v('old info: %s\n'%old_info_text)
     v('new info: %s\n'%new_info_text)
@@ -74,7 +74,7 @@ def exo(options):
               ['-o',options.output_path]+
               [options.input])
 
-        v('running exomizer: %s\n'%(' '.join(['``'+pipes.quote(arg)+'\'\'' for arg in args])))
+        v('running exomizer: %s\n'%(' '.join(['``'+shlex.quote(arg)+'\'\'' for arg in args])))
         
         exo_result=subprocess.call(args)
         if exo_result!=0: fatal('Exomizer exit code: %d'%exo_result)

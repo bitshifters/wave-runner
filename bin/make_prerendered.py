@@ -57,7 +57,7 @@ def star(cx,cy,rx,ry,theta0):
 ##########################################################################
 
 def save_file(path,data):
-    with open(path,'wb') as f: f.write(''.join([chr(x) for x in data]))
+    with open(path,'wb') as f: f.write(bytes(bytearray(data)))
 
 ##########################################################################
 ##########################################################################
@@ -115,7 +115,7 @@ def create_logo_parts():
         assert len(logo_image[y])%2==0
         extra=(logo_width-len(logo_image[y]))//2
         logo_image[y]=extra*[0]+logo_image[y]+extra*[0]
-    print 'logo now %d x %d'%(len(logo_image[0]),len(logo_image))
+    print('logo now %d x %d'%(len(logo_image[0]),len(logo_image)))
     # logo_bbc=bbc.pack_image(logo_image,4)
     return [Part('logo',logo_image)]
 
@@ -135,8 +135,8 @@ def create_dots_parts():
     single_bg_tile_image=bbc.load_png('graphics/bg_tile_7x8.png',2)
     bg_tiles_image=replicate(single_bg_tile_image,174)
     bg_tiles_bbc=bbc.pack_image(bg_tiles_image,4)
-    print 'bg tiles image: %d x %d'%(len(bg_tiles_image[0]),
-                                     len(bg_tiles_image))
+    print('bg tiles image: %d x %d'%(len(bg_tiles_image[0]),
+                                     len(bg_tiles_image)))
 
     parts=[]
     for offset in range(8):
@@ -156,12 +156,12 @@ def create_7xn_scroll_anims():
     for left in [True,False]:
         for dx in range(1,6):
             offsets=[]
-            print 'dx=%d'%dx
+            print('dx=%d'%dx)
             x=0
             while True:
                 offset=x//2
                 if x%2!=0: offset+=8
-                print '   x=%d offset=%d'%(x,offset)
+                print('   x=%d offset=%d'%(x,offset))
                 offset%=15
 
                 if len(offsets)>0 and offset==offsets[0]: break
@@ -221,10 +221,10 @@ def create_anims_data(anims,data,f):
     for anim in anims:
         while len(data)%2!=0: data.append(0)
 
-        print>>f,'pr_anim_%s=$%04x'%(anim.name,
-                                     LOAD_ADDRESS+len(data))
-        print>>f,'pr_anim_%s_num_frames=%d'%(anim.name,
-                                             len(anim.offsets))
+        print('pr_anim_%s=$%04x'%(anim.name,
+                                     LOAD_ADDRESS+len(data)), file=f)
+        print('pr_anim_%s_num_frames=%d'%(anim.name,
+                                             len(anim.offsets)), file=f)
 
         for offset in anim.offsets: data+=[(offset>>0)&0xff,(offset>>8)&0xff]
 
@@ -242,13 +242,13 @@ def create_parts_data(parts,data,f):
         for row in range(len(part.image)//8):
             addr=LOAD_ADDRESS+len(data)+row*stride
                                         
-            print>>f,'pr_part_%s_row%d_crtc_addr=$%04x>>3'%(part.name,
+            print('pr_part_%s_row%d_crtc_addr=$%04x>>3'%(part.name,
                                                             row,
-                                                            addr)
-        print '$%04x: %s: %d x %d'%(LOAD_ADDRESS+len(data),
+                                                            addr), file=f)
+        print('$%04x: %s: %d x %d'%(LOAD_ADDRESS+len(data),
                                     part.name,
                                     len(part.image[0]),
-                                    len(part.image))
+                                    len(part.image)))
         data+=bbc.pack_image(part.image,4)
         if LOAD_ADDRESS+len(data)>0x8000: fatal('data too large')
 
@@ -274,7 +274,7 @@ def main():
         if len(data)>MAX_ANIMS_SIZE:
             fatal('anims data too large: size is %d bytes, max is %d bytes'%len(data),MAX_ANIMS_SIZE)
 
-        print '%d anim bytes free'%(MAX_ANIMS_SIZE-len(data))
+        print('%d anim bytes free'%(MAX_ANIMS_SIZE-len(data)))
 
         while len(data)<MAX_ANIMS_SIZE: data.append(0)
         

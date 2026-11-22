@@ -21,12 +21,12 @@ Python asset scripts and three small C# build tools. Committed by VectorEyes.
 - `write_up/` - the making-of write-up (text, images, GIFs); `reference_docs/`.
 
 ## Build and run
-- `make`: the repo's own Makefile (`build` target) - **blocked**: its Python scripts are Python 2
-  (`bin/shellcmd.py` fails at `print datetime...` on Python 3) and README asks for Python 2.x, which is not
-  on this machine. Also wants `beebasm` on the PATH (set `BEEBASM=..\..\Bin\beebasm.exe`).
+- `make`: the repo's own Makefile (`build` target) - works. The Python scripts (`bin/*.py` and
+  `audio/vgmconverter.py`) were ported to Python 3 on 2026-11-22 (README still says Python 2.x).
+  The Makefile's Windows `BEEBASM` default is now `..\..\third-party\beebasm\beebasm.exe` (override with `BEEBASM=`).
 - Other targets: `clean`, and `tom_dist` / `b2` / `tags` (Tom Seddon's macOS helpers, not for here).
-- Output: `BSNova19.ssd` (Master 128). Not built on 2026-11-22.
-- To build again: port `bin/*.py` to Python 3 (mostly `print` statements), or install Python 2.7 and pass `PYTHON=`.
+- Output: `BSNova19.ssd` (Master 128), plus `intermediate/` (both untracked, not in .gitignore). Every file on the
+  rebuilt disc is byte-identical to the released v1.1 disc (`bitshifters.github.io\content\bs-wave-runner-v1-1.ssd`).
 
 ## Local changes
 - None. Nothing new added except `START_HERE.md` (the existing Makefile was left as it is).

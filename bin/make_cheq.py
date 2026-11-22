@@ -7,7 +7,7 @@ import math,sys,bbc2png,bbc,png,collections,socket,os,random
 def create_image(w,h,value): return [w*[value] for y in range(h)]
 
 def save_file(path,data):
-    with open(path,'wb') as f: f.write(''.join([chr(x) for x in data]))
+    with open(path,'wb') as f: f.write(bytes(bytearray(data)))
 
 ##########################################################################
 ##########################################################################
@@ -15,11 +15,11 @@ def save_file(path,data):
 def print_hi_lo_tables(f,stem,values,expr_suffix=''):
     def print_hi_lo_table(op,shift):
         label='%s_%s'%(stem,op)
-        print>>f,'.%s'%label
-        for value in values: print>>f,'equb %s($%x%s)'%(op,
+        print('.%s'%label, file=f)
+        for value in values: print('equb %s($%x%s)'%(op,
                                                         value,
-                                                        expr_suffix)
-        print>>f,'must_be_same_page %s'%label
+                                                        expr_suffix), file=f)
+        print('must_be_same_page %s'%label, file=f)
         
     print_hi_lo_table('hi',8)
     print_hi_lo_table('lo',0)
@@ -49,26 +49,26 @@ def print_tables(f):
                            frame_addrs,
                            '>>3')
     
-    print>>f,'.cheq_frame_palettes'
-    for i in range(16): print>>f,'equb %d'%(0 if (i&4)==0 else 16)
-    print>>f,'must_be_same_page cheq_frame_palettes'
+    print('.cheq_frame_palettes', file=f)
+    for i in range(16): print('equb %d'%(0 if (i&4)==0 else 16), file=f)
+    print('must_be_same_page cheq_frame_palettes', file=f)
 
     # layer_colours=[0,1,2,3]m
-    print>>f,'.cheq_palette'
+    print('.cheq_palette', file=f)
     offset=0
     for shift in [0,1]:
         for j in range(16):
             layer_colour=j>>(shift*2)&3
-            print>>f,'equb $%02x ; index %d = colour %d (+%d)'%(j<<4|layer_colour^7,
+            print('equb $%02x ; index %d = colour %d (+%d)'%(j<<4|layer_colour^7,
                                                                 j,
                                                                 layer_colour,
-                                                                offset)
+                                                                offset), file=f)
             offset+=1
             
-    print>>f,'must_be_same_page cheq_palette'
+    print('must_be_same_page cheq_palette', file=f)
 
     for layer_colour in range(4):
-        print>>f,'.cheq_set_colour%d'%layer_colour
+        print('.cheq_set_colour%d'%layer_colour, file=f)
         writes={}
         for shift in [0,1]:
             for j in range(16):
@@ -83,9 +83,9 @@ def print_tables(f):
                 old_index=index
             line+=':'.join(['sta cheq_palette+%d'%offset
                             for offset in writes[index]])
-            print>>f,line
-        print>>f,'rts'
-        print>>f
+            print(line, file=f)
+        print('rts', file=f)
+        print(file=f)
 
         # print>>f,writes
         #             # print>>f,'; set +%d'%(shift*8+j)

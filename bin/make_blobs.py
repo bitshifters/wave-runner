@@ -27,7 +27,7 @@ def fill_ellipse(image,cx,cy,rx,ry,value):
                 row[x]=value
 
 def save_file(path,data):
-    with open(path,'wb') as f: f.write(''.join([chr(x) for x in data]))
+    with open(path,'wb') as f: f.write(bytes(bytearray(data)))
         # f.write(''.join([chr(x) for x in bbc.pack_image(image,
         #                                                 bpp)]))
             
@@ -152,7 +152,7 @@ class Builder:
         if self._italics: self._num_frames+=7
 
 def main():
-    print 'create images...'
+    print('create images...')
     num_rows=7
     blobs_image=create_image(180,num_rows*32,15)
     for row in range(num_rows):
@@ -168,16 +168,16 @@ def main():
             fill_ellipse(blobs_image,x,y,xr,yr*rscale,col)
     blobs_bbc=bbc.pack_image(blobs_image,4)
     save_file('intermediate/blobs_image.dat',blobs_bbc)
-    print 'create BBC image...'
+    print('create BBC image...')
     bbc2png.main(['-c','90',
                   '-o','intermediate/blobs_image.png',
                   'intermediate/blobs_image.dat','2'])
     
-    print 'load font PNG...'
+    print('load font PNG...')
     font=read_png('fonts/simple_6x8.png')
     
     glyphs={}
-    print 'font_pic: %d x %d, %d'%(font.w,font.h,len(font.data[0]))
+    print('font_pic: %d x %d, %d'%(font.w,font.h,len(font.data[0])))
     assert font.h==8
     glyph_width=6
     assert font.w%glyph_width==0
@@ -259,9 +259,9 @@ def main():
 
     # ensure the indexes match up.
     with open('intermediate/blobs_tables.6502','wt') as f:
-        print>>f,'blobs_anim_num_frames=%d'%blobs_anim_num_frames
-        print>>f,'.blobs_command_routines'
+        print('blobs_anim_num_frames=%d'%blobs_anim_num_frames, file=f)
+        print('.blobs_command_routines', file=f)
         for index,command in enumerate(g_commands):
-            print>>f,'equw blobs_%s ; %d'%(command.name,index*2)
+            print('equw blobs_%s ; %d'%(command.name,index*2), file=f)
 
 if __name__=='__main__': main()

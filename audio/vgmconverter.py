@@ -29,6 +29,10 @@ import binascii
 import math
 from os.path import basename
 
+# Python 3: hexlify returns bytes; the code compares/concatenates it as str (as on Python 2)
+def hexlify(b):
+	return binascii.hexlify(b).decode('ascii')
+
 if (sys.version_info > (3, 0)):
 	from io import BytesIO as ByteBuffer
 else:
@@ -309,7 +313,7 @@ class VgmStream:
 	def __init__(self, vgm_filename):
 
 		self.vgm_filename = vgm_filename
-		print "  VGM file loaded : '" + vgm_filename + "'"
+		print("  VGM file loaded : '" + vgm_filename + "'")
 		
 		# open the vgm file and parse it
 		vgm_file = open(vgm_filename, 'rb')
@@ -336,12 +340,12 @@ class VgmStream:
 		self.vgm_loop_offset = self.metadata['loop_offset']
 		self.vgm_loop_length = self.metadata['loop_samples']
 		
-		print "      VGM Version : " + "%x" % int(self.metadata['version'])
-		print "VGM SN76489 clock : " + str(float(self.metadata['sn76489_clock'])/1000000) + " MHz"
-		print "         VGM Rate : " + str(float(self.metadata['rate'])) + " Hz"
-		print "      VGM Samples : " + str(int(self.metadata['total_samples'])) + " (" + str(int(self.metadata['total_samples'])/self.VGM_FREQUENCY) + " seconds)"
-		print "  VGM Loop Offset : " + str(self.vgm_loop_offset)
-		print "  VGM Loop Length : " + str(self.vgm_loop_length)
+		print("      VGM Version : " + "%x" % int(self.metadata['version']))
+		print("VGM SN76489 clock : " + str(float(self.metadata['sn76489_clock'])/1000000) + " MHz")
+		print("         VGM Rate : " + str(float(self.metadata['rate'])) + " Hz")
+		print("      VGM Samples : " + str(int(self.metadata['total_samples'])) + " (" + str(int(self.metadata['total_samples'])/self.VGM_FREQUENCY) + " seconds)")
+		print("  VGM Loop Offset : " + str(self.vgm_loop_offset))
+		print("  VGM Loop Length : " + str(self.vgm_loop_length))
 
 
 
@@ -359,7 +363,7 @@ class VgmStream:
 		else:
 			self.dual_chip_mode_enabled = False
 			
-		print "    VGM Dual Chip : " + str(self.dual_chip_mode_enabled)
+		print("    VGM Dual Chip : " + str(self.dual_chip_mode_enabled))
 		
 
 		# override/disable dual chip commands in the output stream if required
@@ -367,7 +371,7 @@ class VgmStream:
 			# remove the clock flag that enables dual chip mode
 			self.metadata['sn76489_clock'] = self.metadata['sn76489_clock'] & 0xbfffffff
 			self.dual_chip_mode_enabled = False
-			print "Dual Chip Mode Disabled - DC Commands will be removed"
+			print("Dual Chip Mode Disabled - DC Commands will be removed")
 
 		# take a copy of the clock speed for the VGM processor functions
 		self.vgm_source_clock = self.metadata['sn76489_clock']
@@ -377,8 +381,8 @@ class VgmStream:
 		self.parse_gd3()
 		self.parse_commands()
 		
-		print "   VGM Commands # : " + str(len(self.command_list))
-		print ""
+		print("   VGM Commands # : " + str(len(self.command_list)))
+		print("")
 
 
 	def validate_vgm_data(self):
@@ -398,10 +402,10 @@ class VgmStream:
 
 			try:
 				if self.data.read(4) != self.vgm_magic_number:
-					print "Error: Data does not appear to be a valid VGM file"
+					print("Error: Data does not appear to be a valid VGM file")
 					raise ValueError('Data does not appear to be a valid VGM file')
 			except IOError:
-				print "Error: Data does not appear to be a valid VGM file"
+				print("Error: Data does not appear to be a valid VGM file")
 				# IOError will be raised if the file is not a valid gzip file
 				raise ValueError('Data does not appear to be a valid VGM file')
 
@@ -437,7 +441,7 @@ class VgmStream:
 
 	def validate_vgm_version(self):
 		if self.metadata['version'] not in self.supported_ver_list:
-			print "VGM version is not supported"
+			print("VGM version is not supported")
 			raise FatalError('VGM version is not supported')
 
 	def parse_gd3(self):
@@ -479,7 +483,7 @@ class VgmStream:
 
 		# Once all the fields have been parsed, create a dict with the data
 		# some Gd3 tags dont have notes section
-		gd3_notes = ''
+		gd3_notes = b''
 		gd3_title_eng = basename(self.vgm_filename).encode("utf_16")
 		if len(gd3_fields) > 10:
 			gd3_notes = gd3_fields[10]
@@ -504,19 +508,19 @@ class VgmStream:
 				'notes': gd3_notes
 			}		
 		else:
-			print "WARNING: Malformed/missing GD3 tag"
+			print("WARNING: Malformed/missing GD3 tag")
 			self.gd3_data = {
 				'title_eng': gd3_title_eng,
-				'title_jap': '',
-				'game_eng': '',
-				'game_jap': '',
-				'console_eng': '',
-				'console_jap': '',
+				'title_jap': b'',
+				'game_eng': b'',
+				'game_jap': b'',
+				'console_eng': b'',
+				'console_jap': b'',
 				'artist_eng': 'Unknown'.encode("utf_16"),
-				'artist_jap': '',
-				'date': '',
-				'vgm_creator': '',
-				'notes': ''
+				'artist_jap': b'',
+				'date': b'',
+				'vgm_creator': b'',
+				'notes': b''
 			}				
 
 
@@ -541,7 +545,7 @@ class VgmStream:
 			command = self.data.read(1)
 
 			# Break if we are at the end of the file
-			if command == '':
+			if command == b'':
 				break
 
 			# 0x4f dd - Game Gear PSG stereo, write dd to port 0x06
@@ -624,7 +628,7 @@ class VgmStream:
 			
 	def write_vgm(self, filename):
 			
-		print "   VGM Processing : Writing output VGM file '" + filename + "'"
+		print("   VGM Processing : Writing output VGM file '" + filename + "'")
 		vgm_stream = bytearray()
 		vgm_time = 0
 		
@@ -636,7 +640,7 @@ class VgmStream:
 
 			# track time offset for debug purposes
 			if b'\x70' <= command <= b'\x7f':	
-				pdata = binascii.hexlify(command)
+				pdata = hexlify(command)
 				t = int(pdata, 16)
 				t &= 15
 				t += 1
@@ -644,15 +648,15 @@ class VgmStream:
 				scommand = "WAITn"
 				#if self.VERBOSE: print " WAITN=" + str(t)
 			else:
-				pcommand = binascii.hexlify(command)
+				pcommand = hexlify(command)
 			
 				if pcommand == "61":
 					scommand = "WAIT"
-					pdata = binascii.hexlify(data)
+					pdata = hexlify(data)
 					t = int(pdata, 16)
 					# sdm: swap bytes to LSB
 					lsb = t & 255
-					msb = (t / 256)
+					msb = (t // 256)
 					t = (lsb * 256) + msb
 					vgm_time += t		
 					#if self.VERBOSE: print " WAIT=" + str(t)
@@ -666,11 +670,11 @@ class VgmStream:
 			
 			
 			if (data != None):
-				if self.VERBOSE: print "command=" + str(binascii.hexlify(command)) + ", data=" + str(binascii.hexlify(data)) + ", time=" + str(float(vgm_time)/44100.0) + " secs"
+				if self.VERBOSE: print("command=" + str(hexlify(command)) + ", data=" + str(hexlify(data)) + ", time=" + str(float(vgm_time)/44100.0) + " secs")
 				
 			# filter dual chip
 			if b'\x30' == command:
-				if self.VERBOSE: print "DUAL CHIP COMMAND"
+				if self.VERBOSE: print("DUAL CHIP COMMAND")
 				#continue
 				#command = b'\x50'
 
@@ -700,7 +704,7 @@ class VgmStream:
 			gd3_data.extend(self.gd3_data['vgm_creator'] + b'\x00\x00')
 			gd3_data.extend(self.gd3_data['notes'] + b'\x00\x00')
 			
-			gd3_stream.extend('Gd3 ')
+			gd3_stream.extend(b'Gd3 ')
 			gd3_stream.extend(struct.pack('I', 0x100))				# GD3 version
 			gd3_stream.extend(struct.pack('I', len(gd3_data)))		# GD3 length		
 			gd3_stream.extend(gd3_data)		
@@ -708,7 +712,7 @@ class VgmStream:
 			gd3_offset = (64-20) + vgm_stream_length
 			gd3_stream_length = len(gd3_stream)
 		else:
-			print "   VGM Processing : GD3 tag was stripped"
+			print("   VGM Processing : GD3 tag was stripped")
 		
 		# build the full VGM output stream		
 		vgm_data = bytearray()
@@ -743,9 +747,9 @@ class VgmStream:
 		vgm_file.write(vgm_data)
 		vgm_file.close()
 		
-		print "   VGM Processing : Written " + str(int(len(vgm_data))) + " bytes, GD3 tag used " + str(gd3_stream_length) + " bytes"
+		print("   VGM Processing : Written " + str(int(len(vgm_data))) + " bytes, GD3 tag used " + str(gd3_stream_length) + " bytes")
 		
-		print "All done."
+		print("All done.")
 
 	#-------------------------------------------------------------------------------------------------
 			
@@ -799,7 +803,7 @@ class VgmStream:
 	
 	# iterate through the command list, removing any write commands that are destined for filter_channel_id
 	def filter_channel(self, filter_channel_id):
-		print "   VGM Processing : Filtering channel " + str(filter_channel_id)
+		print("   VGM Processing : Filtering channel " + str(filter_channel_id))
 	
 		filtered_command_list = []
 		j = 0
@@ -812,7 +816,7 @@ class VgmStream:
 			else:
 				# Check if LATCH/DATA write 								
 				qdata = q["data"]
-				qw = int(binascii.hexlify(qdata), 16)
+				qw = int(hexlify(qdata), 16)
 				if qw & 128:					
 					# Get channel id and latch it
 					latched_channel = (qw>>5)&3
@@ -825,7 +829,7 @@ class VgmStream:
 	#-------------------------------------------------------------------------------------------------
 	# iterate through the command list, unpacking any single tone writes on a channel
 	def unpack_tones(self):
-		print "   VGM Processing : Unpacking tones "
+		print("   VGM Processing : Unpacking tones ")
 	
 		filtered_command_list = []
 		j = 0
@@ -842,7 +846,7 @@ class VgmStream:
 			
 				# Check if LATCH/DATA write 								
 				qdata = q["data"]
-				qw = int(binascii.hexlify(qdata), 16)
+				qw = int(hexlify(qdata), 16)
 				if qw & 128:					
 					# Get channel id and latch it
 					latched_channel = (qw>>5)&3
@@ -874,7 +878,7 @@ class VgmStream:
 
 								# Check if next this is a DATA write, and capture frequency if so
 								# otherwise, its a LATCH/DATA write, so no additional frequency to process
-								nw = int(binascii.hexlify(ndata), 16)
+								nw = int(hexlify(ndata), 16)
 								if (nw & 128) == 0:
 									multi_write = True
 									nfreq = (nw & 0b00111111)
@@ -884,7 +888,7 @@ class VgmStream:
 					
 						# if we detected a single register tone write, we need as unpack it, to make sure transposing works correctly
 						if multi_write == False and latched_channel != 3:
-							if self.VERBOSE: print " UNPACKING SINGLE REGISTER TONE WRITE on CHANNEL " + str(latched_channel)
+							if self.VERBOSE: print(" UNPACKING SINGLE REGISTER TONE WRITE on CHANNEL " + str(latched_channel))
 							# inject additional tone write to prevent any more single register tone writes
 							# re-program q and re-cycle it
 							
@@ -917,8 +921,8 @@ class VgmStream:
 
 		if (self.vgm_source_clock != self.vgm_target_clock):
 		
-			print "   VGM Processing : Re-tuning VGM to new clock speed"
-			print "   VGM Processing : Original clock " + str(float(self.vgm_source_clock)/1000000.0) + " MHz, Target Clock " + str(float(self.vgm_target_clock)/1000000.0) + " MHz"
+			print("   VGM Processing : Re-tuning VGM to new clock speed")
+			print("   VGM Processing : Original clock " + str(float(self.vgm_source_clock)/1000000.0) + " MHz, Target Clock " + str(float(self.vgm_target_clock)/1000000.0) + " MHz")
 		
 			# used by the clock retuning code, initialized once at the start of the song, so that latched register states are preserved across the song
 			latched_tone_frequencies = [0, 0, 0, 0]
@@ -933,14 +937,14 @@ class VgmStream:
 			# does not change any external state
 			def recalc_frequency(tone_frequency, is_periodic_noise_tone = False):
 			
-				if self.VERBOSE: print " recalc_frequency(), vgm_time=" + str(vgm_time) + " clock time=" + str(float(vgm_time)/44100.0) + " secs"
+				if self.VERBOSE: print(" recalc_frequency(), vgm_time=" + str(vgm_time) + " clock time=" + str(float(vgm_time)/44100.0) + " secs")
 
 			
 				# compute the correct frequency
 				# first check it is not 0 (illegal value)
 				output_freq = 0
 				if tone_frequency == 0:
-					if self.VERBOSE: print "Zero frequency tone detected on channel "# + str(latched_channel)
+					if self.VERBOSE: print("Zero frequency tone detected on channel ")# + str(latched_channel)
 				else:
 				
 					# compute correct hz frequency of current tone from formula:
@@ -950,23 +954,23 @@ class VgmStream:
 					#      ( 2 x N x 16)                                 ( 2 x N x 16 x SR)
 					
 					if is_periodic_noise_tone:	
-						if self.VERBOSE: print "Periodic noise tone"
+						if self.VERBOSE: print("Periodic noise tone")
 						noise_ratio = (15.0 / 16.0) * (float(self.vgm_source_clock) / float(self.vgm_target_clock))
 						v = float(tone_frequency) / noise_ratio
-						if self.VERBOSE: print "noise_ratio=" + str(noise_ratio)
-						if self.VERBOSE: print "original freq=" + str(tone_frequency) + ", new freq=" + str(v)
-						if self.VERBOSE: print "retuned periodic noise effect on channel 2"										
+						if self.VERBOSE: print("noise_ratio=" + str(noise_ratio))
+						if self.VERBOSE: print("original freq=" + str(tone_frequency) + ", new freq=" + str(v))
+						if self.VERBOSE: print("retuned periodic noise effect on channel 2")										
 
 					else:
-						if self.VERBOSE: print "Normal tone"				
+						if self.VERBOSE: print("Normal tone")				
 						# compute corrected tone register value for generating the same frequency using the target chip's clock rate
 						hz = float(self.vgm_source_clock) / ( 2.0 * float(tone_frequency) * 16.0)
-						if self.VERBOSE: print "hz=" + str(hz)
+						if self.VERBOSE: print("hz=" + str(hz))
 						v = float(self.vgm_target_clock) / (2.0 * hz * 16.0 )
-						if self.VERBOSE: print "v=" + str(v)
+						if self.VERBOSE: print("v=" + str(v))
 					
 					# due to the integer maths, some precision is lost at the lower end
-					output_freq = int(round(v))	# using round minimizes error margin at lower precision
+					output_freq = int(math.floor(v + 0.5))	# using round minimizes error margin at lower precision
 					# clamp range to 10 bits
 					if output_freq > 1023:
 						output_freq = 1023
@@ -981,9 +985,9 @@ class VgmStream:
 						hz2 = float(self.vgm_target_clock) / (2.0 * float(output_freq) * 16.0)
 
 					hz_err = hz2-hz1
-					if self.VERBOSE: print "channel=" + str(latched_channel) + ", old frequency=" + str(tone_frequency) + ", new frequency=" + str(output_freq) + ", source_clock=" + str(self.vgm_source_clock) + ", target_clock=" + str(self.vgm_target_clock) + ", src_hz=" + str(hz1) + ", tgt_hz=" + str(hz2) + ", hz_err =" + str(hz_err)
+					if self.VERBOSE: print("channel=" + str(latched_channel) + ", old frequency=" + str(tone_frequency) + ", new frequency=" + str(output_freq) + ", source_clock=" + str(self.vgm_source_clock) + ", target_clock=" + str(self.vgm_target_clock) + ", src_hz=" + str(hz1) + ", tgt_hz=" + str(hz2) + ", hz_err =" + str(hz_err))
 					if hz_err > 2.0 or hz_err < -2.0:
-						print "  WARNING: Large error transposing tone! [" + str(hz_err) + " Hz ] (channel="+str(latched_channel)+", PN="+str(is_periodic_noise_tone)+")"
+						print("  WARNING: Large error transposing tone! [" + str(hz_err) + " Hz ] (channel="+str(latched_channel)+", PN="+str(is_periodic_noise_tone)+")")
 					#if self.VERBOSE: print ""
 				
 				return output_freq		
@@ -1001,7 +1005,7 @@ class VgmStream:
 				# track time offset for debug purposes
 				data = self.command_list[n]["data"]
 				if b'\x70' <= command <= b'\x7f':	
-					pdata = binascii.hexlify(command)
+					pdata = hexlify(command)
 					t = int(pdata, 16)
 					t &= 15
 					t += 1
@@ -1009,15 +1013,15 @@ class VgmStream:
 					scommand = "WAITn"
 					#if self.VERBOSE: print " WAITN=" + str(t)
 				else:
-					pcommand = binascii.hexlify(command)
+					pcommand = hexlify(command)
 				
 					if pcommand == "61":
 						scommand = "WAIT"
-						pdata = binascii.hexlify(data)
+						pdata = hexlify(data)
 						t = int(pdata, 16)
 						# sdm: swap bytes to LSB
 						lsb = t & 255
-						msb = (t / 256)
+						msb = (t // 256)
 						t = (lsb * 256) + msb
 						vgm_time += t		
 						#if self.VERBOSE: print " WAIT=" + str(t)
@@ -1029,14 +1033,14 @@ class VgmStream:
 								vgm_time += 882								
 				
 				if TEST_OUTPUT:
-					print "TEST: vgm frame (1/60ths) = " + str( (vgm_time/735) )
+					print("TEST: vgm frame (1/60ths) = " + str( (vgm_time/735) ))
 				
 				# only process write data commands
 				if command == struct.pack('B', 0x50):
 					qdata = self.command_list[n]["data"]
 					
 					# Check if LATCH/DATA write 								
-					qw = int(binascii.hexlify(qdata), 16)
+					qw = int(hexlify(qdata), 16)
 					if qw & 128:
 					
 						# low tone values (min 0x001) generate high frequency 
@@ -1083,7 +1087,7 @@ class VgmStream:
 
 							new_volume = qw & 15
 							if TEST_OUTPUT:
-								print "TEST: channel " + str(latched_channel) + " volume set to " + str(new_volume)
+								print("TEST: channel " + str(latched_channel) + " volume set to " + str(new_volume))
 
 							# True/False to enable detection & correction of "quad tones"
 							if True:
@@ -1091,7 +1095,7 @@ class VgmStream:
 									if new_volume != 15:
 										if latched_volumes[3] != 15:
 											if (latched_tone_frequencies[3]) & 3 == 3:
-												print "WARNING: Volume non zero on channel 2 when channel 3 is playing periodic noise, analysing..."
+												print("WARNING: Volume non zero on channel 2 when channel 3 is playing periodic noise, analysing...")
 												
 												# ok, to make doubly sure we arent muting channel 2 unnecessarily, look ahead
 												# to see if any other volume writes (to set volume 0) on channel 3 are incoming for this time slot
@@ -1104,35 +1108,35 @@ class VgmStream:
 													# interpret any non-VGM-write commands to mean end of time slot
 													if ncommand != struct.pack('B', 0x50):
 														if TEST_OUTPUT:
-															print " INFO: end of time slot (command " + str(binascii.hexlify(ncommand)) + ")"
+															print(" INFO: end of time slot (command " + str(hexlify(ncommand)) + ")")
 														break
 													else:
 														if TEST_OUTPUT:
-															print " INFO: found command in same time slot"
+															print(" INFO: found command in same time slot")
 														# found the next VGM write command
 														ndata = self.command_list[nindex]["data"]
 
 														# Check if next this is a DATA write, and check if a channel 3 volume
-														nw = int(binascii.hexlify(ndata), 16)
+														nw = int(hexlify(ndata), 16)
 														if (nw & 128):	# check for data
 						
 															# Check incoming channel id and if volume command 
 															incoming_channel_id = (nw>>5)&3
 															if TEST_OUTPUT:
-																print "  INFO: is a data command on channel " + str(incoming_channel_id)
+																print("  INFO: is a data command on channel " + str(incoming_channel_id))
 															if (incoming_channel_id == 3) and (nw & 16) != 0:	
 																if TEST_OUTPUT:
-																	print "  INFO: is a volume setting of " + str(nw & 15)
+																	print("  INFO: is a volume setting of " + str(nw & 15))
 																
 																# Yes, it's a volume command on channel 3
 																if (nw & 15) == 15:	# silent
-																	print " INFO: detected incoming volume off on channel 3, overrides correction"
+																	print(" INFO: detected incoming volume off on channel 3, overrides correction")
 																	volume_channel3_will_be_zeroed = True
 																	break	
 
 												# so only mute channel 2 if we know channel 3 isnt going to be set to volume 15 this frame
 												if not volume_channel3_will_be_zeroed:
-													print " INFO: corrected volume, channel 2 was auto-muted due to active channel 3 periodic noise"
+													print(" INFO: corrected volume, channel 2 was auto-muted due to active channel 3 periodic noise")
 													new_volume = 15
 
 													lo_data = (qw & 0b11110000) | (new_volume & 0b00001111)
@@ -1152,12 +1156,12 @@ class VgmStream:
 							latched_tone_frequencies[latched_channel] = (latched_tone_frequencies[latched_channel] & 0b1111110000) | qfreq
 							
 							if TEST_OUTPUT:
-								print "TEST: channel " + str(latched_channel) + " pitch set to " + str(qfreq)
+								print("TEST: channel " + str(latched_channel) + " pitch set to " + str(qfreq))
 
 							# check for non-tuned periodic noise (might sound out of tune when converted, because clock speed drives this)
 							# bit 2 of frequency on noise channel =0 for PN, or =1 for white noise
 							if latched_channel == 3 and (latched_tone_frequencies[3] < 3):
-								print "WARNING: Non-tuned periodic noise detected, may not sound in tune due to different clock speed."
+								print("WARNING: Non-tuned periodic noise detected, may not sound in tune due to different clock speed.")
 							
 							# sanity check - detect if ratio of DATA writes is 1:1 with LATCH writes
 							if False:
@@ -1176,12 +1180,12 @@ class VgmStream:
 
 										# Check if next this is a DATA write, and capture frequency if so
 										# otherwise, its a LATCH/DATA write, so no additional frequency to process
-										nw = int(binascii.hexlify(ndata), 16)
+										nw = int(hexlify(ndata), 16)
 										if (nw & 128) == 0:
 											dcount += 1
 										else:
 											#if dcount > 1:
-											print "WARNING: DCOUNT=" + str(dcount) #DANGER WILL ROBINSON"
+											print("WARNING: DCOUNT=" + str(dcount)) #DANGER WILL ROBINSON"
 											break
 								
 							# look ahead, and see if the next command is a DATA write as if so, this will be part of the same tone commmand
@@ -1202,7 +1206,7 @@ class VgmStream:
 
 									# Check if next this is a DATA write, and capture frequency if so
 									# otherwise, its a LATCH/DATA write, so no additional frequency to process
-									nw = int(binascii.hexlify(ndata), 16)
+									nw = int(hexlify(ndata), 16)
 									if (nw & 128) == 0:
 										multi_write = True
 										nfreq = (nw & 0b00111111)
@@ -1231,7 +1235,7 @@ class VgmStream:
 										
 										if tone2_offsets[0] < 0:
 											# Likely cause of this is that the tuned PN is started, and the pitch is set on channel2 afterwards
-											print "WARNING: Unexpected scenario - tone2 offset is not set"
+											print("WARNING: Unexpected scenario - tone2 offset is not set")
 										else:
 
 											#print "POTENTIAL RETUNE REQUIRED"
@@ -1244,7 +1248,7 @@ class VgmStream:
 																
 											# now write back to the previous channel 2 tone command(s) with the newly corrected frequency
 											zdata = self.command_list[tone2_offsets[0]]["data"]
-											zw = int(binascii.hexlify(zdata), 16)
+											zw = int(hexlify(zdata), 16)
 											lo_data = (zw & 0b11110000) | (f & 0b00001111)
 											
 
@@ -1282,17 +1286,17 @@ class VgmStream:
 								hi_data = (new_freq>>4) & 0b00111111
 								self.command_list[nindex]["data"] = struct.pack('B', hi_data)	
 							else:
-								if self.VERBOSE: print "SINGLE REGISTER TONE WRITE on CHANNEL " + str(latched_channel)
+								if self.VERBOSE: print("SINGLE REGISTER TONE WRITE on CHANNEL " + str(latched_channel))
 
-							if self.VERBOSE: print "new_freq=0x" + format(new_freq, 'x') + ", lo_data=0x" + format(lo_data, '02x') + ", hi_data=0x" + format(hi_data, '02x')
-							if self.VERBOSE: print ""
+							if self.VERBOSE: print("new_freq=0x" + format(new_freq, 'x') + ", lo_data=0x" + format(lo_data, '02x') + ", hi_data=0x" + format(hi_data, '02x'))
+							if self.VERBOSE: print("")
 		else:
-			print "transpose() - No transposing necessary as target clock matches source clock"
+			print("transpose() - No transposing necessary as target clock matches source clock")
 			
 	#-------------------------------------------------------------------------------------------------
 	# iterate through the command list, removing any duplicate volume or tone writes
 	def optimize(self):
-		print "   VGM Processing : Optimizing VGM Stream "
+		print("   VGM Processing : Optimizing VGM Stream ")
 
 		# total number of commands in the vgm stream
 		num_commands = len(self.command_list)
@@ -1324,11 +1328,11 @@ class VgmStream:
 			
 			# process the command
 	
-			pcommand = binascii.hexlify(command)
+			pcommand = hexlify(command)
 			# write command - add to optimized command list
 			if pcommand == "50":
 
-				pdata = binascii.hexlify(data)
+				pdata = hexlify(data)
 				w = int(pdata, 16)	
 				
 				# capture current channel
@@ -1370,7 +1374,7 @@ class VgmStream:
 							# write command - add to optimized command list
 							if ncommand == struct.pack('B', 0x50):
 
-								nw = int(binascii.hexlify(ndata), 16)	
+								nw = int(hexlify(ndata), 16)	
 								if nw & 128 == 0:
 									tone_hi = (nw & 0b0000111111) << 4
 									skip_next_data_write = True
@@ -1403,9 +1407,9 @@ class VgmStream:
 				optimized_command_list.append( { 'command' : command, 'data' : data } )		
 
 
-		print "- Removed " + str(removed_volume_count) + " duplicate volume commands"
-		print "- Removed " + str(removed_tone_count) + " duplicate tone commands"
-		print "- originally contained " + str(num_commands) + " commands, now contains " + str(len(optimized_command_list)) + " commands"
+		print("- Removed " + str(removed_volume_count) + " duplicate volume commands")
+		print("- Removed " + str(removed_tone_count) + " duplicate tone commands")
+		print("- originally contained " + str(num_commands) + " commands, now contains " + str(len(optimized_command_list)) + " commands")
 
 		# replace internal command list with optimized command list
 		self.command_list = optimized_command_list
@@ -1428,11 +1432,11 @@ class VgmStream:
 			command = c["command"]
 			data = c["data"]
 			
-			pcommand = binascii.hexlify(command)
+			pcommand = hexlify(command)
 			# write command - add to optimized command list, removing any it replaces
 			if pcommand == "50":
 
-				pdata = binascii.hexlify(data)
+				pdata = hexlify(data)
 				w = int(pdata, 16)		
 				# Check if LATCH/DATA write enabled - since this is the start of a write command
 				if (w & (128+16)) == (128+16):
@@ -1441,7 +1445,7 @@ class VgmStream:
 					tone_list.append( c )
 					
 			else:
-				print "ERROR - WAS NOT EXPECTING non register data in command list"
+				print("ERROR - WAS NOT EXPECTING non register data in command list")
 		
 		
 		##### EXPERIMENTAL CODE TO SORT COMMANDS INTO CHANNEL ORDER ####
@@ -1459,8 +1463,8 @@ class VgmStream:
 					command = c["command"]
 					data = c["data"]
 					
-					if binascii.hexlify(command) == "50":
-						w = int(binascii.hexlify(data), 16)		
+					if hexlify(command) == "50":
+						w = int(hexlify(data), 16)		
 						# already know its a volume command, so just check channel
 						if ((w >> 5) & 3) == channel:
 							volume_channel_list.append( c )
@@ -1473,8 +1477,8 @@ class VgmStream:
 					command = c["command"]
 					data = c["data"]
 					
-					if binascii.hexlify(command) == "50":
-						w = int(binascii.hexlify(data), 16)		
+					if hexlify(command) == "50":
+						w = int(hexlify(data), 16)		
 						# already know its a tone command, so just check channel
 						if (w & 128):
 							if ((w >> 5) & 3) == channel:
@@ -1505,7 +1509,7 @@ class VgmStream:
 	# this allows for better frequency correction - some tunes set tones before volumes which makes it tricky
 	# to detect tuned noise effects and compensate accordingly. Sorting register updates makes this more accurate.
 	def optimize2(self):
-		print "   VGM Processing : Optimizing VGM Packets "
+		print("   VGM Processing : Optimizing VGM Packets ")
 
 		# total number of commands in the vgm stream
 		num_commands = len(self.command_list)	
@@ -1525,11 +1529,11 @@ class VgmStream:
 			# writes get accumulated into time slots
 
 
-			pcommand = binascii.hexlify(command)
+			pcommand = hexlify(command)
 			# write command - add to optimized command list, removing any it replaces
 			if pcommand == "50":
 
-				pdata = binascii.hexlify(data)
+				pdata = hexlify(data)
 				w = int(pdata, 16)		
 				
 
@@ -1549,7 +1553,7 @@ class VgmStream:
 							temp_command_list = []
 							for c in optimized_command_list:
 								qdata = c["data"]
-								qw = int(binascii.hexlify(qdata), 16)
+								qw = int(hexlify(qdata), 16)
 								redundant = False
 								
 								# Check if LATCH/DATA write enabled 
@@ -1567,7 +1571,7 @@ class VgmStream:
 								if (not redundant):
 									temp_command_list.append(c)								
 								else:
-									if self.VERBOSE: print "Command#" + str(i) + " Removed redundant volume write"
+									if self.VERBOSE: print("Command#" + str(i) + " Removed redundant volume write")
 									
 							# replace command list with optimized command list
 							optimized_command_list = temp_command_list
@@ -1581,7 +1585,7 @@ class VgmStream:
 							redundant_tone_data = False	# set to true if 
 							for c in optimized_command_list:
 								qdata = c["data"]
-								qw = int(binascii.hexlify(qdata), 16)
+								qw = int(hexlify(qdata), 16)
 
 								redundant = False
 								
@@ -1609,7 +1613,7 @@ class VgmStream:
 									temp_command_list.append(c)
 								else:
 									redundant_count += 1
-									if self.VERBOSE: print "Command#" + str(i) + " Removed redundant tone write"
+									if self.VERBOSE: print("Command#" + str(i) + " Removed redundant tone write")
 									
 								# replace command list with optimized command list
 								optimized_command_list = temp_command_list							
@@ -1628,8 +1632,8 @@ class VgmStream:
 				optimized_command_list = []
 				output_command_list.append( { 'command' : command, 'data' : data } )	
 
-		print "- Removed " + str(redundant_count) + " redundant commands"
-		print "- originally contained " + str(num_commands) + " commands, now contains " + str(len(output_command_list)) + " commands"
+		print("- Removed " + str(redundant_count) + " redundant commands")
+		print("- originally contained " + str(num_commands) + " commands, now contains " + str(len(output_command_list)) + " commands")
 
 		# replace internal command list with optimized command list
 		self.command_list = output_command_list
@@ -1640,10 +1644,10 @@ class VgmStream:
 	
 	def quantize(self, play_rate):
 				
-		print "   VGM Processing : Quantizing VGM to " + str(play_rate) + " Hz"
+		print("   VGM Processing : Quantizing VGM to " + str(play_rate) + " Hz")
 
 		if self.VGM_FREQUENCY % play_rate != 0:
-			print " ERROR - Cannot quantize to a fractional interval, must be an integer factor of 44100"
+			print(" ERROR - Cannot quantize to a fractional interval, must be an integer factor of 44100")
 			return
 		
 		# total number of commands in the vgm stream
@@ -1655,7 +1659,7 @@ class VgmStream:
 		vgm_time = 0
 		playback_time = 0
 
-		interval_time = self.VGM_FREQUENCY/play_rate	
+		interval_time = self.VGM_FREQUENCY//play_rate	
 		
 		vgm_command_index = 0
 
@@ -1668,10 +1672,10 @@ class VgmStream:
 		# clip the output to the desired length if specified as non zero number of 'play_rate' frames
 		total_frames = self.LENGTH
 		if total_frames > 0:
-			print "Limiting total frames to " + str(total_frames)
-			print "original total_samples " + str(total_samples)
+			print("Limiting total frames to " + str(total_frames))
+			print("original total_samples " + str(total_samples))
 			total_samples = (self.VGM_FREQUENCY * total_frames)
-			print "new total_samples " + str(total_samples)
+			print("new total_samples " + str(total_samples))
 			self.metadata['total_samples'] = total_samples
 
 						
@@ -1694,15 +1698,15 @@ class VgmStream:
 				# waits get accumulated to vgm_time
 				
 				if b'\x70' <= command <= b'\x7f':	
-					pdata = binascii.hexlify(command)
+					pdata = hexlify(command)
 					t = int(pdata, 16)
 					t &= 15
 					t += 1
 					vgm_time += t
 					scommand = "WAITn"
-					if self.VERBOSE: print "WAITN=" + str(t)
+					if self.VERBOSE: print("WAITN=" + str(t))
 				else:
-					pcommand = binascii.hexlify(command)
+					pcommand = hexlify(command)
 				
 					if pcommand == "50":
 						# add the latest command to the list
@@ -1710,14 +1714,14 @@ class VgmStream:
 					else:
 						if pcommand == "61":
 							scommand = "WAIT"
-							pdata = binascii.hexlify(data)
+							pdata = hexlify(data)
 							t = int(pdata, 16)
 							# sdm: swap bytes to LSB
 							lsb = t & 255
-							msb = (t / 256)
+							msb = (t // 256)
 							t = (lsb * 256) + msb
 							vgm_time += t		
-							if self.VERBOSE: print "WAIT=" + str(t)
+							if self.VERBOSE: print("WAIT=" + str(t))
 						else:			
 							if pcommand == "66":	#end
 								# send the end command
@@ -1732,10 +1736,10 @@ class VgmStream:
 									else:
 										unhandled_commands += 1		
 				
-				if self.VERBOSE: print "vgm_time=" + str(vgm_time) + ", playback_time=" + str(playback_time) + ", vgm_command_index=" + str(vgm_command_index) + ", output_command_list=" + str(len(output_command_list)) + ", command=" + pcommand
+				if self.VERBOSE: print("vgm_time=" + str(vgm_time) + ", playback_time=" + str(playback_time) + ", vgm_command_index=" + str(vgm_command_index) + ", output_command_list=" + str(len(output_command_list)) + ", command=" + pcommand)
 				vgm_command_index += 1
 			
-			if self.VERBOSE: print "vgm_time has caught up with playback_time"
+			if self.VERBOSE: print("vgm_time has caught up with playback_time")
 			
 
 			
@@ -1746,12 +1750,12 @@ class VgmStream:
 			
 				# flush any pending wait commands before data writes, to optimize redundant wait commands
 
-				if self.VERBOSE: print "Flushing " + str(len(quantized_command_list)) + " commands, accumulated_time=" + str(accumulated_time)
+				if self.VERBOSE: print("Flushing " + str(len(quantized_command_list)) + " commands, accumulated_time=" + str(accumulated_time))
 				
 				# make sure we limit the max time delay to be the nearest value under 65535
 				# that is wholly divisible by the quantization interval
-				max_accumulated_time = 65535 / (self.VGM_FREQUENCY/play_rate)
-				max_accumulated_time = max_accumulated_time * (self.VGM_FREQUENCY/play_rate)
+				max_accumulated_time = 65535 // (self.VGM_FREQUENCY//play_rate)
+				max_accumulated_time = max_accumulated_time * (self.VGM_FREQUENCY//play_rate)
 				while (accumulated_time > 0):
 					
 					# ensure no wait commands exceed the 16-bit limit
@@ -1761,24 +1765,24 @@ class VgmStream:
 					
 					# optimization: if quantization time step is 1/50 or 1/60 of a second use the single byte wait
 					if t == 882: # 50Hz
-						if self.VERBOSE: print "Outputting WAIT50"
+						if self.VERBOSE: print("Outputting WAIT50")
 						output_command_list.append( { 'command' : b'\x63', 'data' : None } )
 					else:
 						if t == 882*2: # 25Hz
-							if self.VERBOSE: print "Outputting 2x WAIT50 "
+							if self.VERBOSE: print("Outputting 2x WAIT50 ")
 							output_command_list.append( { 'command' : b'\x63', 'data' : None } )	
 							output_command_list.append( { 'command' : b'\x63', 'data' : None } )	
 						else:
 							if t == 735: # 60Hz
-								if self.VERBOSE: print "Outputting WAIT60"
+								if self.VERBOSE: print("Outputting WAIT60")
 								output_command_list.append( { 'command' : b'\x62', 'data' : None } )	
 							else:
 								if t == 735*2: # 30Hz
-									if self.VERBOSE: print "Outputting WAIT60 x 2"
+									if self.VERBOSE: print("Outputting WAIT60 x 2")
 									output_command_list.append( { 'command' : b'\x62', 'data' : None } )	
 									output_command_list.append( { 'command' : b'\x62', 'data' : None } )	
 								else:
-									if self.VERBOSE: print "Outputting WAIT " + str(t) + " (" + str(float(t)/float(interval_time)) + " intervals)"
+									if self.VERBOSE: print("Outputting WAIT " + str(t) + " (" + str(float(t)/float(interval_time)) + " intervals)")
 									# else emit the full 16-bit wait command (3 bytes)
 									output_command_list.append( { 'command' : b'\x61', 'data' : struct.pack('H', t) } )	
 
@@ -1789,14 +1793,14 @@ class VgmStream:
 
 
 			# accumulate time to next quantized time period
-			next_w = (self.VGM_FREQUENCY/play_rate)
+			next_w = (self.VGM_FREQUENCY//play_rate)
 			accumulated_time += next_w
-			if self.VERBOSE: print "next_w=" + str(next_w)
+			if self.VERBOSE: print("next_w=" + str(next_w))
 
 
 		# report
-		print "Processed VGM stream, quantized to " + str(play_rate) + "Hz playback intervals" 
-		print "- originally contained " + str(num_commands) + " commands, now contains " + str(len(output_command_list)) + " commands"
+		print("Processed VGM stream, quantized to " + str(play_rate) + "Hz playback intervals")
+		print("- originally contained " + str(num_commands) + " commands, now contains " + str(len(output_command_list)) + " commands")
 
 		self.command_list = output_command_list
 		num_commands = len(output_command_list)	
@@ -1868,7 +1872,7 @@ class VgmStream:
 			if b'\x70' <= command <= b'\x7f':		
 				pcommand = "WAITn"
 			else:
-				pcommand = binascii.hexlify(command)
+				pcommand = hexlify(command)
 				
 			
 				if pcommand == "50":
@@ -1917,7 +1921,7 @@ class VgmStream:
 					event = { "wait" : 0, "t0" : -1, "v0" : -1, "t1" : -1, "v1" : -1, "t2" : -1, "v2" : -1, "t3" : -1,  "v3" : - 1 }	
 					
 				# process the write data
-				pdata = binascii.hexlify(data)
+				pdata = hexlify(data)
 				w = int(pdata, 16)
 				s = pdata
 				pdata = s + " (" + str(w) + ")"
@@ -1986,11 +1990,11 @@ class VgmStream:
 						waitdictionary.append(t)	
 
 				if pcommand == "WAIT ":
-					pdata = binascii.hexlify(data)
+					pdata = hexlify(data)
 					t = int(pdata, 16)
 					# sdm: swap bytes to LSB
 					lsb = t & 255
-					msb = (t / 256)
+					msb = (t // 256)
 					t = (lsb * 256) + msb
 					waittime += t
 					if t < minwait:
@@ -2003,7 +2007,7 @@ class VgmStream:
 
 				if pcommand == "WAITn":
 					# data will be "None" for this but thats ok.
-					pdata = binascii.hexlify(command)
+					pdata = hexlify(command)
 					t = int(pdata, 16)
 					t &= 15
 					waittime += t
@@ -2019,7 +2023,7 @@ class VgmStream:
 
 				
 
-			print "#" + str(n) + " Command:" + pcommand + " Data:" + pdata # '{:02x}'.format(data)
+			print("#" + str(n) + " Command:" + pcommand + " Data:" + pdata) # '{:02x}'.format(data)
 
 		# NOTE: multiple register writes happen instantaneously
 		# ideas:
@@ -2037,15 +2041,15 @@ class VgmStream:
 
 
 		#--------------------------------
-		print "--------------------------------------------------------------------------"
-		print "Number of sampled events: " + str(len(eventlist))
+		print("--------------------------------------------------------------------------")
+		print("Number of sampled events: " + str(len(eventlist)))
 
 		for n in range(len(eventlist)):
 			event = eventlist[n]
-			print "%6d" % n + " " + str(event)
+			print("%6d" % n + " " + str(event))
 			
 
-		print "--------------------------------------------------------------------------"
+		print("--------------------------------------------------------------------------")
 
 		# compile volume channel 0 stream
 
@@ -2060,11 +2064,11 @@ class VgmStream:
 		eventlist_t3 = []
 
 		def printEvents(eventlistarray, arrayname):
-			print ""
-			print "Total " + arrayname + " events: " + str(len(eventlistarray))
+			print("")
+			print("Total " + arrayname + " events: " + str(len(eventlistarray)))
 			for n in range(len(eventlistarray)):
 				event = eventlistarray[n]
-				print "%6d" % n + " " + str(event)
+				print("%6d" % n + " " + str(event))
 
 		def processEvents(eventsarray_in, eventsarray_out, tag_in, tag_out):
 			waittime = 0
@@ -2095,47 +2099,47 @@ class VgmStream:
 		# ----------------------- analysis
 
 
-		print "Number of commands in data file: " + str(num_commands)
-		print "Total samples in data file: " + str(total_samples) + " (" + str(total_samples*1000/self.VGM_FREQUENCY) + " ms)"
-		print "Smallest wait time was: " + str(minwait) + " samples"
-		print "Smallest waitN time was: " + str(minwaitn) + " samples"
-		print "ClockSpeed:" + str(clockspeed) + " SampleRate:" + str(samplerate) + " CyclesPerSample:" + str(cyclespersample) + " CyclesPerWrite:" + str(cyclespersample*minwait)
-		print "Updates Per Second:" + str(clockspeed/(cyclespersample*minwait))
-		print "Total register writes:" + str(totalwritecount) + " Max Sequential Writes:" + str(maxwritecount) # sequential writes happen at same time, in series
-		print "Total tone writes:" + str(totaltonewrites)
-		print "Total vol writes:" + str(totalvolwrites)
-		print "Total wait commands:" + str(totalwaitcommands)
-		print "Write dictionary contains " + str(len(writedictionary)) + " unique entries"
-		print "Wait dictionary contains " + str(len(waitdictionary)) + " unique entries"
-		print "Tone dictionary contains " + str(len(tonedictionary)) + " unique entries"
-		print "Largest Tone Data Write value was " + str(maxtonedata)
-		print "Number of Tone Data writes was " + str(numtonedatawrites)
-		print "Number of unhandled commands was " + str(unhandledcommands)
+		print("Number of commands in data file: " + str(num_commands))
+		print("Total samples in data file: " + str(total_samples) + " (" + str(total_samples*1000/self.VGM_FREQUENCY) + " ms)")
+		print("Smallest wait time was: " + str(minwait) + " samples")
+		print("Smallest waitN time was: " + str(minwaitn) + " samples")
+		print("ClockSpeed:" + str(clockspeed) + " SampleRate:" + str(samplerate) + " CyclesPerSample:" + str(cyclespersample) + " CyclesPerWrite:" + str(cyclespersample*minwait))
+		print("Updates Per Second:" + str(clockspeed/(cyclespersample*minwait)))
+		print("Total register writes:" + str(totalwritecount) + " Max Sequential Writes:" + str(maxwritecount)) # sequential writes happen at same time, in series
+		print("Total tone writes:" + str(totaltonewrites))
+		print("Total vol writes:" + str(totalvolwrites))
+		print("Total wait commands:" + str(totalwaitcommands))
+		print("Write dictionary contains " + str(len(writedictionary)) + " unique entries")
+		print("Wait dictionary contains " + str(len(waitdictionary)) + " unique entries")
+		print("Tone dictionary contains " + str(len(tonedictionary)) + " unique entries")
+		print("Largest Tone Data Write value was " + str(maxtonedata))
+		print("Number of Tone Data writes was " + str(numtonedatawrites))
+		print("Number of unhandled commands was " + str(unhandledcommands))
 
 
 		estimatedfilesize = totalwritecount + totalwaitcommands
 
-		print "Estimated file size is " + str(estimatedfilesize) + " bytes, assuming 1 byte per command can be achieved"
+		print("Estimated file size is " + str(estimatedfilesize) + " bytes, assuming 1 byte per command can be achieved")
 
 
-		print ""
+		print("")
 
-		print "num t0 events: " + str(len(eventlist_t0)) + " (" + str(len(eventlist_t0)*3) + " bytes)"
-		print "num t1 events: " + str(len(eventlist_t1)) + " (" + str(len(eventlist_t1)*3) + " bytes)"
-		print "num t2 events: " + str(len(eventlist_t2)) + " (" + str(len(eventlist_t2)*3) + " bytes)"
-		print "num t3 events: " + str(len(eventlist_t3)) + " (" + str(len(eventlist_t3)*3) + " bytes)"
-		print "num v0 events: " + str(len(eventlist_v0)) + " (" + str(len(eventlist_v0)*3) + " bytes)"
-		print "num v1 events: " + str(len(eventlist_v1)) + " (" + str(len(eventlist_v1)*3) + " bytes)"
-		print "num v2 events: " + str(len(eventlist_v2)) + " (" + str(len(eventlist_v2)*3) + " bytes)"
-		print "num v3 events: " + str(len(eventlist_v3)) + " (" + str(len(eventlist_v3)*3) + " bytes)"
+		print("num t0 events: " + str(len(eventlist_t0)) + " (" + str(len(eventlist_t0)*3) + " bytes)")
+		print("num t1 events: " + str(len(eventlist_t1)) + " (" + str(len(eventlist_t1)*3) + " bytes)")
+		print("num t2 events: " + str(len(eventlist_t2)) + " (" + str(len(eventlist_t2)*3) + " bytes)")
+		print("num t3 events: " + str(len(eventlist_t3)) + " (" + str(len(eventlist_t3)*3) + " bytes)")
+		print("num v0 events: " + str(len(eventlist_v0)) + " (" + str(len(eventlist_v0)*3) + " bytes)")
+		print("num v1 events: " + str(len(eventlist_v1)) + " (" + str(len(eventlist_v1)*3) + " bytes)")
+		print("num v2 events: " + str(len(eventlist_v2)) + " (" + str(len(eventlist_v2)*3) + " bytes)")
+		print("num v3 events: " + str(len(eventlist_v3)) + " (" + str(len(eventlist_v3)*3) + " bytes)")
 
 		total_volume_events = len(eventlist_v0) + len(eventlist_v1) + len(eventlist_v2) + len(eventlist_v3)
 		total_tone_events = len(eventlist_t0) + len(eventlist_t1) + len(eventlist_t2) + len(eventlist_t3)
 		size_volume_events = (total_volume_events * 4 / 8) + total_volume_events*2 / 4
 		size_tone_events = (total_tone_events * 10 / 8) + total_tone_events*2
 
-		print "total_volume_events = " + str(total_volume_events) + " (" + str(size_volume_events) + " bytes)"
-		print "total_tone_events = " + str(total_tone_events) + " (" + str(size_tone_events) + " bytes)"
+		print("total_volume_events = " + str(total_volume_events) + " (" + str(size_volume_events) + " bytes)")
+		print("total_tone_events = " + str(total_tone_events) + " (" + str(size_tone_events) + " bytes)")
 
 
 		# seems you can playback at any frequency, by simply processing the VGM data stream to catchup with the simulated/real time
@@ -2187,9 +2191,9 @@ class VgmStream:
 
 	def insights(self):
 	
-		print "--------------------------------------"
-		print "insights"
-		print "--------------------------------------"
+		print("--------------------------------------")
+		print("insights")
+		print("--------------------------------------")
 
 		packet_dict = []
 		volume_packet_dict = []
@@ -2226,7 +2230,7 @@ class VgmStream:
 				data = q['data']	
 				packet_block.extend(data)
 				
-				w = int(binascii.hexlify(data), 16)		
+				w = int(hexlify(data), 16)		
 				
 				# gather volume data
 				if w & (128+16) == (128+16):
@@ -2263,7 +2267,7 @@ class VgmStream:
 				# gather tone data
 				if (w & 128) == 0:
 					if tone_latch_write == False:
-						print "ERROR: UNEXPECTED tone data write with no previous latch write"
+						print("ERROR: UNEXPECTED tone data write with no previous latch write")
 					tone_packet_block.extend(data)
 					tone_data_write_count += 1
 					tone_latch_write = False
@@ -2351,10 +2355,10 @@ class VgmStream:
 				
 #		print " Found " + str(common_packets) + " common packets out of total " + str(packet_count) + " packets"
 
-		print " There were " + str(len(packet_dict)) + " unique packets out of total "+ str(packet_count) + " packets"
-		print " There were " + str(len(volume_packet_dict)) + " unique volume packets out of total "+ str(packet_count) + " packets"
-		print " There were " + str(len(tone_packet_dict)) + " unique tone packets out of total "+ str(packet_count) + " packets"
-		print ""
+		print(" There were " + str(len(packet_dict)) + " unique packets out of total "+ str(packet_count) + " packets")
+		print(" There were " + str(len(volume_packet_dict)) + " unique volume packets out of total "+ str(packet_count) + " packets")
+		print(" There were " + str(len(tone_packet_dict)) + " unique tone packets out of total "+ str(packet_count) + " packets")
+		print("")
 		
 		def get_packet_dict_size(dict):
 			sz = 0
@@ -2362,59 +2366,59 @@ class VgmStream:
 				sz += len(p)
 			return sz
 			
-		print " Packet dictionary size " + str(get_packet_dict_size(packet_dict)) + " bytes"
-		print " Volume dictionary size " + str(get_packet_dict_size(volume_packet_dict)) + " bytes"
-		print "   Tone dictionary size " + str(get_packet_dict_size(tone_packet_dict)) + " bytes"
-		print ""
+		print(" Packet dictionary size " + str(get_packet_dict_size(packet_dict)) + " bytes")
+		print(" Volume dictionary size " + str(get_packet_dict_size(volume_packet_dict)) + " bytes")
+		print("   Tone dictionary size " + str(get_packet_dict_size(tone_packet_dict)) + " bytes")
+		print("")
 		
-		print " Number of unique volumes " + str(len(volume_dict)) + " (max 64)"	# should max out at 64 (4x16)
-		print " Number of volume writes " + str(volume_write_count)
-		print ""
-		print " Number of unique tones " + str(len(tone_dict))
-		print " Number of tone latch writes " + str(tone_latch_write_count)
-		print " Number of tone data writes " + str(tone_data_write_count)
-		print " Total 16-bit tone data writes " + str(tone_latch_write_count+tone_data_write_count)
-		print " Number of single tone latch writes " + str(tone_single_write_count)
-		print ""
-		print " Packet size distributions (0-11 bytes):"
+		print(" Number of unique volumes " + str(len(volume_dict)) + " (max 64)")	# should max out at 64 (4x16)
+		print(" Number of volume writes " + str(volume_write_count))
+		print("")
+		print(" Number of unique tones " + str(len(tone_dict)))
+		print(" Number of tone latch writes " + str(tone_latch_write_count))
+		print(" Number of tone data writes " + str(tone_data_write_count))
+		print(" Total 16-bit tone data writes " + str(tone_latch_write_count+tone_data_write_count))
+		print(" Number of single tone latch writes " + str(tone_single_write_count))
+		print("")
+		print(" Packet size distributions (0-11 bytes):")
 
 		t = 0
 		for i in range(0,12):
 			t += packet_size_counts[i]
-		print packet_size_counts, t
+		print(packet_size_counts, t)
 			
 
-		print ""
-		print " Unique Packet dict distributions (0-11 bytes):"
+		print("")
+		print(" Unique Packet dict distributions (0-11 bytes):")
 		t = 0
 		for i in range(0,12):
 			t += packet_dict_counts[i]
-		print packet_dict_counts, t
+		print(packet_dict_counts, t)
 
-		print ""
-		print " Byte cost distributions (0-11 bytes):"
+		print("")
+		print(" Byte cost distributions (0-11 bytes):")
 		o = "[ "
 		t = 0
 		for i in range(0,12):
 			n = (packet_dict_counts[i]) * (i)
 			t += n
 			o += str(n) + ", "
-		print o + "]", t
+		print(o + "]", t)
 
 
-		print ""
-		print " Byte saving distributions (0-11 bytes):"
+		print("")
+		print(" Byte saving distributions (0-11 bytes):")
 		t = 0
 		o = "[ "
 		for i in range(0,12):
 			n = (packet_size_counts[i] - packet_dict_counts[i]) * (i)
 			t += n
 			o += str(n) + ", "
-		print o + "]", t
+		print(o + "]", t)
 
 
 
-		print ""
+		print("")
 		tp = 0
 		bs = 0
 		size = 1
@@ -2423,25 +2427,25 @@ class VgmStream:
 			bs += n * size
 			size += 1
 			
-		print " (total packets " + str(tp) + ")"
-		print " (total stream bytesize " + str(bs) + ")"
-		print " (write count byte size " + str(volume_write_count+tone_latch_write_count+tone_data_write_count+packet_count) + ")"
+		print(" (total packets " + str(tp) + ")")
+		print(" (total stream bytesize " + str(bs) + ")")
+		print(" (write count byte size " + str(volume_write_count+tone_latch_write_count+tone_data_write_count+packet_count) + ")")
 
-		print " Volume writes represent " + str( volume_write_count * 100 / (bs-packet_count) ) + " % of filesize"
-		print "   Tone writes represent " + str( (tone_latch_write_count+tone_data_write_count) * 100 / (bs-packet_count) ) + " % of filesize"
+		print(" Volume writes represent " + str( volume_write_count * 100 / (bs-packet_count) ) + " % of filesize")
+		print("   Tone writes represent " + str( (tone_latch_write_count+tone_data_write_count) * 100 / (bs-packet_count) ) + " % of filesize")
 		
-		print " Filesize using packet LUT " + str( packet_count*2 + get_packet_dict_size(packet_dict))
-		print " Filesize using vol/tone packet LUT " + str( packet_count*4 + get_packet_dict_size(volume_packet_dict) + get_packet_dict_size(tone_packet_dict) )
-		print "--------------------------------------"
+		print(" Filesize using packet LUT " + str( packet_count*2 + get_packet_dict_size(packet_dict)))
+		print(" Filesize using vol/tone packet LUT " + str( packet_count*4 + get_packet_dict_size(volume_packet_dict) + get_packet_dict_size(tone_packet_dict) ))
+		print("--------------------------------------")
 	
 	#--------------------------------------------------------------------------------------------------------------
 
 	# Apply a sliding window dictionary compression to the packet data
 	def compress_packets(self):
 	
-		print "--------------------------------------"
-		print "packet compression"
-		print "--------------------------------------"
+		print("--------------------------------------")
+		print("packet compression")
+		print("--------------------------------------")
 
 		packet_list = []
 		packet_dict = []
@@ -2466,7 +2470,7 @@ class VgmStream:
 				packet_block = bytearray()
 
 
-		print "Found " + str(len(packet_list)) + " packets"
+		print("Found " + str(len(packet_list)) + " packets")
 
 
 		# approach:
@@ -2513,7 +2517,7 @@ class VgmStream:
 						if window_ptr+packet_size > window_size:
 							window_ptr = 0
 
-						print "New packet added to window index " + str(window_ptr)
+						print("New packet added to window index " + str(window_ptr))
 						for j in range(packet_size):
 							window_data[window_ptr+j] = packet[j]
 
@@ -2525,11 +2529,11 @@ class VgmStream:
 					output_stream.append(packet_size)
 					output_stream.extend(packet)
 				else:
-					print "Found packet at index " + str(packet_index)
+					print("Found packet at index " + str(packet_index))
 					output_stream.extend(struct.pack('h', packet_index))
 
 
-			print "Output stream size " + str(len(output_stream))
+			print("Output stream size " + str(len(output_stream)))
 			bin_file = open("xxx.bin", 'wb')
 			bin_file.write(output_stream)
 			bin_file.close()				
@@ -2570,9 +2574,9 @@ class VgmStream:
 				output_stream.extend(struct.pack('h', packet_index))
 
 
-			print "Unique packets " + str(total_new_packets)
-			print "Dict stream size " + str(len(dict_stream))
-			print "Output stream size " + str(len(output_stream))
+			print("Unique packets " + str(total_new_packets))
+			print("Dict stream size " + str(len(dict_stream)))
+			print("Output stream size " + str(len(output_stream)))
 
 
 			# write to output file
@@ -2583,7 +2587,7 @@ class VgmStream:
 			bin_file.write(dict_stream)
 			bin_file.close()			
 
-		print "--------------------------------------"
+		print("--------------------------------------")
 
 
 
@@ -2594,7 +2598,7 @@ class VgmStream:
 	#--------------------------------------------------------------------------------------------------------------	
 	
 	def write_binary(self, filename, rawheader = True):
-		print "   VGM Processing : Output binary file "
+		print("   VGM Processing : Output binary file ")
 		
 		# debug data to dump out information about the packet stream
 		#self.insights()
@@ -2616,9 +2620,9 @@ class VgmStream:
 			if command != struct.pack('B', 0x50):
 			
 				# non-write command, so flush any pending packet data
-				if self.VERBOSE: print "Packet length " + str(len(packet_block))
+				if self.VERBOSE: print("Packet length " + str(len(packet_block)))
 
-				data_block.append(struct.pack('B', len(packet_block)))
+				data_block.append(len(packet_block))
 				data_block.extend(packet_block)
 				packet_count += 1
 				
@@ -2628,14 +2632,14 @@ class VgmStream:
 				# start new packet
 				packet_block = bytearray()
 				
-				if self.VERBOSE: print "Command " + str(binascii.hexlify(command))
+				if self.VERBOSE: print("Command " + str(hexlify(command)))
 				
 				
 
 				# see if command is a wait longer than one interval and emit empty packets to compensate
 				wait = 0
 				if command == struct.pack('B', 0x61):
-					t = int(binascii.hexlify(q["data"]), 16)
+					t = int(hexlify(q["data"]), 16)
 					wait = ((t & 255) * 256) + (t>>8)
 				else:
 					if command == struct.pack('B', 0x62):
@@ -2645,25 +2649,25 @@ class VgmStream:
 							wait = 	882
 					
 				if wait != 0:	
-					intervals = wait / (self.VGM_FREQUENCY / play_rate)
+					intervals = wait // (self.VGM_FREQUENCY // play_rate)
 					if intervals == 0:
-						print "ERROR in data stream, wait value (" + str(wait) + ") was not divisible by play_rate (" + str((self.VGM_FREQUENCY / play_rate)) + "), bailing"
+						print("ERROR in data stream, wait value (" + str(wait) + ") was not divisible by play_rate (" + str((self.VGM_FREQUENCY / play_rate)) + "), bailing")
 						return
 					else:
-						if self.VERBOSE: print "WAIT " + str(intervals) + " intervals"
+						if self.VERBOSE: print("WAIT " + str(intervals) + " intervals")
 						
 					# emit empty packet headers to simulate wait commands
 					intervals -= 1
 					while intervals > 0:
 						data_block.append(0)
-						if self.VERBOSE: print "Packet length 0"
+						if self.VERBOSE: print("Packet length 0")
 						intervals -= 1
 						packet_count += 1
 
 				
 				
 			else:
-				if self.VERBOSE: print "Data " + str(binascii.hexlify(command))			
+				if self.VERBOSE: print("Data " + str(hexlify(command)))			
 				packet_block.extend(q['data'])
 
 		# eof
@@ -2673,24 +2677,24 @@ class VgmStream:
 		
 		header_block = bytearray()
 		# emit the play rate
-		print "play rate is " + str(play_rate)
-		header_block.append(struct.pack('B', play_rate & 0xff))
-		header_block.append(struct.pack('B', packet_count & 0xff))		
-		header_block.append(struct.pack('B', (packet_count >> 8) & 0xff))	
+		print("play rate is " + str(play_rate))
+		header_block.append(play_rate & 0xff)
+		header_block.append(packet_count & 0xff)		
+		header_block.append((packet_count >> 8) & 0xff)	
 
-		print "    Num packets " + str(packet_count)
-		duration = packet_count / play_rate
+		print("    Num packets " + str(packet_count))
+		duration = packet_count // play_rate
 		duration_mm = int(duration / 60.0)
 		duration_ss = int(duration % 60.0)
-		print "    Song duration " + str(duration) + " seconds, " + str(duration_mm) + "m" + str(duration_ss) + "s"
-		header_block.append(struct.pack('B', duration_mm))	# minutes		
-		header_block.append(struct.pack('B', duration_ss))	# seconds
+		print("    Song duration " + str(duration) + " seconds, " + str(duration_mm) + "m" + str(duration_ss) + "s")
+		header_block.append(duration_mm)	# minutes		
+		header_block.append(duration_ss)	# seconds
 		
 		# output the final byte stream
 		output_block = bytearray()	
 		
 		# send header
-		output_block.append(struct.pack('B', len(header_block)))
+		output_block.append(len(header_block))
 		output_block.extend(header_block)
 
 		# send title
@@ -2699,9 +2703,9 @@ class VgmStream:
 		
 		if len(title) > 254:
 			title = title[:254]
-		output_block.append(struct.pack('B', len(title) + 1))	# title string length
+		output_block.append(len(title) + 1)	# title string length
 		output_block.extend(title)
-		output_block.append(struct.pack('B', 0))				# zero terminator
+		output_block.append(0)				# zero terminator
 		
 		# send author
 		author = self.gd3_data['artist_eng'].decode("utf_16")
@@ -2709,13 +2713,13 @@ class VgmStream:
 
 		# use filename if no author listed
 		if len(author) == 0:
-			author = basename(self.vgm_filename)
+			author = basename(self.vgm_filename).encode('ascii', 'ignore')
 
 		if len(author) > 254:
 			author = author[:254]
-		output_block.append(struct.pack('B', len(author) + 1))	# author string length
+		output_block.append(len(author) + 1)	# author string length
 		output_block.extend(author)
-		output_block.append(struct.pack('B', 0))				# zero terminator
+		output_block.append(0)				# zero terminator
 		
 		# send data with or without header
 		if rawheader:
@@ -2724,7 +2728,7 @@ class VgmStream:
 			output_block = data_block
 		
 		# write file
-		print "Compressed VGM is " + str(len(output_block)) + " bytes long"
+		print("Compressed VGM is " + str(len(output_block)) + " bytes long")
 
 		# write to output file
 		bin_file = open(filename, 'wb')
@@ -2776,26 +2780,26 @@ else:
 argc = len(argv)
 
 if argc < 2:
-	print "VGM Conversion Utility for VGM files based on TI SN76849 sound chips"
-	print " Supports gzipped VGM or .vgz files."
-	print ""
-	print " Usage:"
-	print "  vgmconverter <vgmfile> [-transpose <n>] [-quantize <n>] [-filter <n>] [-rawfile <filename>] [-output <filename>] [-length] [-norawheader] [-dump] [-verbose]"
-	print ""
-	print "   where:"
-	print "    <vgmfile> is the source VGM file to be processed. Wildcards are not yet supported."
-	print ""
-	print "   options:"
-	print "    [-transpose <n>, -t <n>] transpose the source VGM to a new frequency. For <n> Specify 'ntsc' (3.57MHz), 'pal' (4.2MHz) or 'bbc' (4.0MHz)"
-	print "    [-quantize <n>, -q <n>] quantize the VGM to a specific playback update interval. For <n> specify an integer Hz value"
-	print "    [-filter <n>, -n <n>] strip one or more output channels from the VGM. For <n> specify a string of channels to filter eg. '0123' or '13' etc."
-	print "    [-rawfile <filename>, -r <filename>] output a raw binary file version of the chip data within the source VGM. A default quantization of 60Hz will be applied if not specified with -q"
-	print "    [-output <filename>, -o <filename>] specifies the filename to output a processed VGM. Optional."
-	print "    [-length <secs>, -l <secs>] limits output to <secs> seconds. Optional."	
-	print "    [-norawheader, -n] removes header from raw file output. Optional."	
+	print("VGM Conversion Utility for VGM files based on TI SN76849 sound chips")
+	print(" Supports gzipped VGM or .vgz files.")
+	print("")
+	print(" Usage:")
+	print("  vgmconverter <vgmfile> [-transpose <n>] [-quantize <n>] [-filter <n>] [-rawfile <filename>] [-output <filename>] [-length] [-norawheader] [-dump] [-verbose]")
+	print("")
+	print("   where:")
+	print("    <vgmfile> is the source VGM file to be processed. Wildcards are not yet supported.")
+	print("")
+	print("   options:")
+	print("    [-transpose <n>, -t <n>] transpose the source VGM to a new frequency. For <n> Specify 'ntsc' (3.57MHz), 'pal' (4.2MHz) or 'bbc' (4.0MHz)")
+	print("    [-quantize <n>, -q <n>] quantize the VGM to a specific playback update interval. For <n> specify an integer Hz value")
+	print("    [-filter <n>, -n <n>] strip one or more output channels from the VGM. For <n> specify a string of channels to filter eg. '0123' or '13' etc.")
+	print("    [-rawfile <filename>, -r <filename>] output a raw binary file version of the chip data within the source VGM. A default quantization of 60Hz will be applied if not specified with -q")
+	print("    [-output <filename>, -o <filename>] specifies the filename to output a processed VGM. Optional.")
+	print("    [-length <secs>, -l <secs>] limits output to <secs> seconds. Optional.")
+	print("    [-norawheader, -n] removes header from raw file output. Optional.")
 	
-	print "    [-dump] output human readable version of the VGM"
-	print "    [-verbose] enable debug information"
+	print("    [-dump] output human readable version of the VGM")
+	print("    [-verbose] enable debug information")
 	exit()
 
 # pre-process argv to merge quoted arguments
@@ -2831,7 +2835,7 @@ for s in argv:
 	outargv.append(s)
 
 if inquotes:
-	print "Error parsing command line " + str(" ".join(argv))
+	print("Error parsing command line " + str(" ".join(argv)))
 	exit()
 
 argv = outargv
@@ -2884,11 +2888,11 @@ for i in range(2, len(argv)):
 										if option == 'n' or option == 'norawheader':
 											option_rawheader = False
 										else:
-											print "ERROR: Unrecognised option '" + arg + "'"
+											print("ERROR: Unrecognised option '" + arg + "'")
 
 # load the VGM
 if source_filename == None:
-	print "ERROR: No source <filename> provided."
+	print("ERROR: No source <filename> provided.")
 	exit()
 
 # if rawfile output is specified, but no quantization option given, force a default quantization of 60Hz (NTSC)
@@ -2898,15 +2902,15 @@ if option_rawfile != None:
 	
 # debug code	
 if False:
-	print "source " + str(source_filename)
-	print "verbose " + str(option_verbose)
-	print "output " + str(option_outputfile)
-	print "transpose " + str(option_transpose)
-	print "quantize " + str(option_quantize)
-	print "filter " + str(option_filter)
-	print "rawfile " + str(option_rawfile)
-	print "dump " + str(option_dump)
-	print ""
+	print("source " + str(source_filename))
+	print("verbose " + str(option_verbose))
+	print("output " + str(option_outputfile))
+	print("transpose " + str(option_transpose))
+	print("quantize " + str(option_quantize))
+	print("filter " + str(option_filter))
+	print("rawfile " + str(option_rawfile))
+	print("dump " + str(option_dump))
+	print("")
 
 
 	
@@ -2974,7 +2978,7 @@ if option_dump != None:
 	vgm_stream.analyse()
 
 # all done
-print ""
-print "Processing complete."
+print("")
+print("Processing complete.")
 
 

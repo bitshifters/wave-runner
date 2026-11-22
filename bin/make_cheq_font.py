@@ -17,7 +17,7 @@ def create_image(w,h,value): return [w*[value] for y in range(h)]
 ##########################################################################
 
 def save_file(path,data):
-    with open(path,'wb') as f: f.write(''.join([chr(x) for x in data]))
+    with open(path,'wb') as f: f.write(bytes(bytearray(data)))
 
 ##########################################################################
 ##########################################################################
@@ -26,6 +26,7 @@ def main():
     stem='anuvverbubbla_8x8'
     
     font_width,font_height,font_pixels,font_metadata=png.Reader(filename='fonts/%s.png'%stem).read()
+    font_pixels=list(font_pixels) # pypng returns an iterator on Python 3
     font_width=min(font_width,472)
     if font_width%8!=0: fatal('width is %d - not a multiple of 8'%font_width)
 
