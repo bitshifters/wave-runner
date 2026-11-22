@@ -7,7 +7,7 @@ Python asset scripts and three small C# build tools. Committed by VectorEyes.
 | | |
 |---|---|
 | GitHub | https://github.com/bitshifters/wave-runner (public, Bitshifters org) |
-| Local path | D:\beeb\mine\wave-runner (moved from OneDrive\BEEB\Repos\wave-runner on 2026-11-22) |
+| Local path | D:\bitshifters\wave-runner (moved from OneDrive\BEEB\Repos\wave-runner on 2026-11-22) |
 | Branch | `master` (only branch) |
 | Last commit | 2019-08-30: Updated the Readme (version 1.1, August 2019) |
 
@@ -23,7 +23,7 @@ Python asset scripts and three small C# build tools. Committed by VectorEyes.
 ## Build and run
 - `make`: the repo's own Makefile (`build` target) - works. The Python scripts (`bin/*.py` and
   `audio/vgmconverter.py`) were ported to Python 3 on 2026-11-22 (README still says Python 2.x).
-  The Makefile's Windows `BEEBASM` default is now `..\..\third-party\beebasm\beebasm.exe` (override with `BEEBASM=`).
+  The Makefile's Windows `BEEBASM` default is now `..\beeb\third-party\beebasm\beebasm.exe` (override with `BEEBASM=`).
 - Other targets: `clean`, and `tom_dist` / `b2` / `tags` (Tom Seddon's macOS helpers, not for here).
 - Output: `BSNova19.ssd` (Master 128), plus `intermediate/` (both untracked, not in .gitignore). Every file on the
   rebuilt disc is byte-identical to the released v1.1 disc (`bitshifters.github.io\content\bs-wave-runner-v1-1.ssd`).

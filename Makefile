@@ -6,7 +6,7 @@ ifeq ($(OS),Windows_NT)
 
 PYTHON?=python
 # beebasm is not on the PATH here; use beebasm 1.11 from D:\beeb\third-party.
-BEEBASM?=..\..\third-party\beebasm\beebasm.exe
+BEEBASM?=..\beeb\third-party\beebasm\beebasm.exe
 EXOMIZER3?=bin\exomizer
 EXOMIZER2?=audio\exomizer
 
